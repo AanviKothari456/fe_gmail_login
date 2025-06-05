@@ -70,5 +70,8 @@ async function sendReply() {
 
 // Only try to load email if you're already logged in
 window.onload = () => {
-  loadEmail(); // will either show or hide #content
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get("logged_in") === "true") {
+    loadEmail(); // ✅ only after login
+  }
 };
