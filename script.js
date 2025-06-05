@@ -6,11 +6,13 @@ async function login() {
 
 async function loadEmail() {
   try {
-    const res = await fetch(`${BASE_URL}/latest_email`);
+    const res = await fetch(`${BASE_URL}/latest_email`, {
+      credentials: "include"
+    });
     const data = await res.json();
     document.getElementById("subject").innerText = data.subject;
     document.getElementById("body").innerText = data.body;
-    document.getElementById("emailAudio").src = data.audio_url;
+    document.getElementById("emailAudio").src = `data:audio/mpeg;base64,${data.audio_base64}`;
     document.getElementById("content").style.display = "block";
   } catch (err) {
     alert("Failed to fetch email. Are you logged in?");
@@ -36,7 +38,7 @@ if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
     alert("Mic error: " + event.error);
   };
 } else {
-  alert("Your browser does not support voice input");
+  alert("Your browser does not support voice input (try Chrome).");
 }
 
 function startRecording() {
@@ -51,8 +53,11 @@ async function sendReply() {
     headers: {
       "Content-Type": "application/json"
     },
+    credentials: "include",
     body: JSON.stringify({ reply })
   });
   const text = await res.text();
   alert("Reply sent!");
 }
+
+window.onload = loadEmail;
