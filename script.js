@@ -9,14 +9,22 @@ async function loadEmail() {
     const res = await fetch(`${BASE_URL}/latest_email`, {
       credentials: "include"
     });
+
+    if (res.status === 401) {
+      // Not logged in → hide email UI
+      document.getElementById("content").style.display = "none";
+      return;
+    }
+
     const data = await res.json();
-    document.getElementById("subject").innerText = data.subject;
-    document.getElementById("body").innerText = data.body;
+    document.getElementById("subject").innerText = data.subject || "(No subject)";
+    document.getElementById("body").innerText = data.body || "(No body)";
     document.getElementById("emailAudio").src = `data:audio/mpeg;base64,${data.audio_base64}`;
     document.getElementById("content").style.display = "block";
+
   } catch (err) {
-    alert("Failed to fetch email. Are you logged in?");
-    console.error(err);
+    console.error("Error loading email:", err);
+    alert("Something went wrong while fetching your email.");
   }
 }
 
@@ -56,8 +64,11 @@ async function sendReply() {
     credentials: "include",
     body: JSON.stringify({ reply })
   });
-  const text = await res.text();
-  alert("Reply sent!");
+  const json = await res.json();
+  alert(json.status || "Reply sent!");
 }
 
-window.onload = loadEmail;
+// Only try to load email if you're already logged in
+window.onload = () => {
+  loadEmail(); // will either show or hide #content
+};
