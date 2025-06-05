@@ -1,0 +1,16 @@
+body {
+  font-family: sans-serif;
+  margin: 2rem;
+  max-width: 800px;
+}
+
+button {
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+}
+
+#transcript {
+  font-style: italic;
+  margin-top: 0.5rem;
+}

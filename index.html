@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Saami - Voice Email Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <h1>Saami - Your Voice Email Assistant</h1>
+  <button onclick="login()">🔐 Login with Gmail</button>
+
+  <div id="content" style="display: none;">
+    <h2>📥 Latest Email</h2>
+    <p><strong>Subject:</strong> <span id="subject"></span></p>
+    <p><strong>Body:</strong></p>
+    <p id="body"></p>
+    <audio id="emailAudio" controls></audio>
+
+    <h3>🎤 Reply</h3>
+    <button onclick="startRecording()">Reply with Voice</button>
+    <p id="transcript"></p>
+    <button onclick="sendReply()">Send Reply</button>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
