@@ -19,8 +19,14 @@ async function loadEmail() {
     const data = await res.json();
     document.getElementById("subject").innerText = data.subject || "(No subject)";
     document.getElementById("body").innerText = data.body || "(No body)";
-    document.getElementById("emailAudio").src = `data:audio/mpeg;base64,${data.audio_base64}`;
+
+    // Populate the two‐line summary field
+    document.getElementById("summary").innerText = data.summary || "(No summary)";
+
     document.getElementById("content").style.display = "block";
+
+    // Automatically read the summary aloud
+    readSummary(data.summary || "");
   } catch (err) {
     console.error("Error loading email:", err);
     alert("Something went wrong while fetching your email.");
@@ -36,7 +42,16 @@ window.onload = () => {
   }
 };
 
-// 2) VOICE‐TO‐TEXT for USER INSTRUCTION
+// 2) SPEECH SYNTHESIS FOR SUMMARY
+function readSummary(text) {
+  const content = text || document.getElementById("summary").innerText;
+  if (!content) return;
+  const utter = new SpeechSynthesisUtterance(content);
+  utter.lang = "en-US";
+  speechSynthesis.speak(utter);
+}
+
+// 3) VOICE‐TO‐TEXT for USER INSTRUCTION
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -67,7 +82,7 @@ function stopRecording() {
   if (recognition) recognition.stop();
 }
 
-// 3) GENERATE AI REPLY (populates the textarea)
+// 4) GENERATE AI REPLY (populates the textarea)
 async function sendReply() {
   const userInstruction = document.getElementById("transcript").dataset.reply;
   if (!userInstruction) {
@@ -92,19 +107,20 @@ async function sendReply() {
   document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// 4) READ OUT and ASK “SEND?” then MIN read a voice response
+// 5) READ OUT-and-ASK “SEND?” then listen for yes/no
 function readAndConfirmReply() {
   const textToRead = document.getElementById("aiReplyEditable").value.trim();
   if (!textToRead) {
     return alert("No reply text to read.");
   }
 
-  // 4a) Use the Web Speech API to read the text aloud
-  const utterance = new SpeechSynthesisUtterance(textToRead + " . . . Do you want to send this email? Say yes or no.");
+  // Read the text, then prompt for confirmation
+  const utterance = new SpeechSynthesisUtterance(
+    textToRead + ". . . Do you want to send this email? Say yes or no."
+  );
   utterance.lang = "en-US";
   speechSynthesis.speak(utterance);
 
-  // 4b) Once the utterance ends, start listening for “yes” / “no”
   utterance.onend = () => {
     listenForConfirmation();
   };
@@ -139,14 +155,13 @@ function listenForConfirmation() {
   ConfirmRecog.start();
 }
 
-// 5) CALL BACKEND TO ACTUALLY SEND VIA GMAIL
+// 6) CALL BACKEND TO ACTUALLY SEND VIA GMAIL
 async function actuallySendEmail() {
   const finalText = document.getElementById("aiReplyEditable").value.trim();
   if (!finalText) {
     return alert("Reply text is empty—nothing to send.");
   }
 
-  // POST to a new endpoint /send_email
   const res = await fetch(`${BASE_URL}/send_email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
