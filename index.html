@@ -34,8 +34,13 @@
     <h3>✍️ AI-Generated Reply (You can edit before sending)</h3>
     <textarea id="aiReplyEditable" rows="8" style="width: 100%; font-size: 1rem;"></textarea>
     <div style="margin-top: 0.5rem;">
-      <button id="readBtn" onclick="readAndConfirmReply()">Read Reply Aloud & Ask to Send</button>
+      <button id="readBtn" onclick="readAndConfirmReply()">Read Reply Aloud & Ask to Send/Next</button>
     </div>
+  </div>
+
+  <!-- “All done” message (starts hidden) -->
+  <div id="doneMessage" style="display: none; font-size: 1.2rem; margin-top: 2rem;">
+    ✅ All tasks done for today.
   </div>
 
   <script src="script.js"></script>
