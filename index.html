@@ -9,10 +9,10 @@
 <body>
   <h1>Saami - Your Voice Email Assistant</h1>
 
-  <!-- 1) Login button (give it an ID so JS can hide it) -->
+  <!-- Login button -->
   <button id="loginBtn" onclick="login()">🔐 Login with Gmail</button>
 
-  <!-- 2) Latest Email section (start hidden) -->
+  <!-- Latest Email & Reply UI -->
   <div id="content" style="display: none;">
     <h2>📥 Latest Email</h2>
     <p><strong>Subject:</strong> <span id="subject"></span></p>
@@ -24,7 +24,11 @@
     <button id="startBtn" onclick="startRecording()">Start Recording</button>
     <button id="stopBtn" onclick="stopRecording()">Stop Recording</button>
     <p id="transcript"></p>
-    <button onclick="sendReply()">Send Reply</button>
+    <button onclick="sendReply()">Send Reply to AI</button>
+
+    <!-- NEW: where the AI-formatted reply shows up -->
+    <h3>AI-Formatted Reply</h3>
+    <pre id="aiReply" style="white-space: pre-wrap; border: 1px solid #ccc; padding: 1rem;"></pre>
   </div>
 
   <script src="script.js"></script>
