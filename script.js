@@ -1,6 +1,8 @@
 // File: script.js
+
 const BASE_URL = "https://basic-gmail-login.onrender.com";
 
+// 1) LOGIN / LOAD EMAIL
 async function login() {
   window.location.href = `${BASE_URL}/login`;
 }
@@ -25,6 +27,16 @@ async function loadEmail() {
   }
 }
 
+window.onload = () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const isLoggedIn = urlParams.get("logged_in") === "true";
+  if (isLoggedIn) {
+    document.getElementById("loginBtn").style.display = "none";
+    loadEmail();
+  }
+};
+
+// 2) VOICE‐TO‐TEXT for USER INSTRUCTION
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -55,14 +67,14 @@ function stopRecording() {
   if (recognition) recognition.stop();
 }
 
+// 3) GENERATE AI REPLY (populates the textarea)
 async function sendReply() {
-  // Grab whatever you just spoke:
   const userInstruction = document.getElementById("transcript").dataset.reply;
   if (!userInstruction) {
     return alert("Please speak a reply instruction first.");
   }
 
-  // Send it to /send_reply to get back the AI‐formatted email text
+  // Call /send_reply to get back AI-formatted text
   const res = await fetch(`${BASE_URL}/send_reply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -76,16 +88,81 @@ async function sendReply() {
   }
 
   const json = await res.json();
-  // Display the AI‐generated reply in a <pre id="aiReply"></pre>
-  document.getElementById("aiReply").innerText = json.formatted_reply;
+  // Put the AI reply inside the editable textarea
+  document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// On page load, hide or show appropriately
-window.onload = () => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const isLoggedIn = urlParams.get("logged_in") === "true";
-  if (isLoggedIn) {
-    document.getElementById("loginBtn").style.display = "none";
-    loadEmail();
+// 4) READ OUT and ASK “SEND?” then MIN read a voice response
+function readAndConfirmReply() {
+  const textToRead = document.getElementById("aiReplyEditable").value.trim();
+  if (!textToRead) {
+    return alert("No reply text to read.");
   }
-};
+
+  // 4a) Use the Web Speech API to read the text aloud
+  const utterance = new SpeechSynthesisUtterance(textToRead + " . . . Do you want to send this email? Say yes or no.");
+  utterance.lang = "en-US";
+  speechSynthesis.speak(utterance);
+
+  // 4b) Once the utterance ends, start listening for “yes” / “no”
+  utterance.onend = () => {
+    listenForConfirmation();
+  };
+}
+
+function listenForConfirmation() {
+  if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
+    return alert("Your browser does not support speech recognition.");
+  }
+
+  const ConfirmRecog = window.SpeechRecognition
+    ? new SpeechRecognition()
+    : new webkitSpeechRecognition();
+  ConfirmRecog.lang = "en-US";
+  ConfirmRecog.continuous = false;
+
+  ConfirmRecog.onresult = (event) => {
+    const answer = event.results[0][0].transcript.toLowerCase().trim();
+    if (answer.includes("yes")) {
+      actuallySendEmail();
+    } else {
+      console.log("User said no, not sending.");
+      alert("Email not sent.");
+    }
+  };
+
+  ConfirmRecog.onerror = (event) => {
+    console.error("Confirmation recognition error:", event.error);
+    alert("Could not understand confirmation. Please click 'Read Reply Aloud & Ask to Send' and say yes or no.");
+  };
+
+  ConfirmRecog.start();
+}
+
+// 5) CALL BACKEND TO ACTUALLY SEND VIA GMAIL
+async function actuallySendEmail() {
+  const finalText = document.getElementById("aiReplyEditable").value.trim();
+  if (!finalText) {
+    return alert("Reply text is empty—nothing to send.");
+  }
+
+  // POST to a new endpoint /send_email
+  const res = await fetch(`${BASE_URL}/send_email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ reply_text: finalText })
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    return alert("Failed to send email: " + (err.error || JSON.stringify(err)));
+  }
+
+  const json = await res.json();
+  if (json.status === "sent") {
+    alert("Email sent successfully!");
+  } else {
+    alert("Unexpected response: " + JSON.stringify(json));
+  }
+}
