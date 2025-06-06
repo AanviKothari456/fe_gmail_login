@@ -2,14 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Saami - Voice Email Assistant</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <h1>Saami - Your Voice Email Assistant</h1>
-  <button onclick="login()">🔐 Login with Gmail</button>
 
+  <!-- 1) Login button (give it an ID so JS can hide it) -->
+  <button id="loginBtn" onclick="login()">🔐 Login with Gmail</button>
+
+  <!-- 2) Latest Email section (start hidden) -->
   <div id="content" style="display: none;">
     <h2>📥 Latest Email</h2>
     <p><strong>Subject:</strong> <span id="subject"></span></p>
@@ -18,7 +21,8 @@
     <audio id="emailAudio" controls></audio>
 
     <h3>🎤 Reply</h3>
-    <button onclick="startRecording()">Reply with Voice</button>
+    <button id="startBtn" onclick="startRecording()">Start Recording</button>
+    <button id="stopBtn" onclick="stopRecording()">Stop Recording</button>
     <p id="transcript"></p>
     <button onclick="sendReply()">Send Reply</button>
   </div>

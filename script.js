@@ -1,34 +1,35 @@
 const BASE_URL = "https://basic-gmail-login.onrender.com";
 
 async function login() {
+  // Clicking “Login with Gmail” → backend /login
   window.location.href = `${BASE_URL}/login`;
 }
 
 async function loadEmail() {
   try {
-    const res = await fetch(`${BASE_URL}/latest_email`, {
-      credentials: "include"
-    });
+    const res = await fetch(`${BASE_URL}/latest_email`, { credentials: "include" });
 
     if (res.status === 401) {
-      // Not logged in → hide email UI
+      // Not logged in → hide email UI, keep the login button visible
       document.getElementById("content").style.display = "none";
       return;
     }
+
+    // We got a valid email back → hide the login button
+    document.getElementById("loginBtn").style.display = "none";
 
     const data = await res.json();
     document.getElementById("subject").innerText = data.subject || "(No subject)";
     document.getElementById("body").innerText = data.body || "(No body)";
     document.getElementById("emailAudio").src = `data:audio/mpeg;base64,${data.audio_base64}`;
     document.getElementById("content").style.display = "block";
-
   } catch (err) {
     console.error("Error loading email:", err);
     alert("Something went wrong while fetching your email.");
   }
 }
 
-// Voice recognition
+// Speech-to-text setup
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -50,7 +51,14 @@ if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
 }
 
 function startRecording() {
-  if (recognition) recognition.start();
+  if (!recognition) return;
+  document.getElementById("transcript").innerText = "";      
+  document.getElementById("transcript").dataset.reply = "";
+  recognition.start();
+}
+
+function stopRecording() {
+  if (recognition) recognition.stop();
 }
 
 async function sendReply() {
@@ -58,9 +66,7 @@ async function sendReply() {
   if (!reply) return alert("Please speak a reply first.");
   const res = await fetch(`${BASE_URL}/send_reply`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ reply })
   });
@@ -68,11 +74,13 @@ async function sendReply() {
   alert(json.status || "Reply sent!");
 }
 
-// Only try to load email if you're already logged in
 window.onload = () => {
   const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get("logged_in") === "true") {
-    loadEmail(); // ✅ only after login
+  const isLoggedIn = urlParams.get("logged_in") === "true";
+
+  if (isLoggedIn) {
+    // Hide login button and immediately fetch email
+    document.getElementById("loginBtn").style.display = "none";
+    loadEmail();
   }
 };
-
