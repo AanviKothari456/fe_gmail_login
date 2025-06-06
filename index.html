@@ -1,19 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
-
-
-
-  <head>
+<head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Saami, your hands-free Email Assistant</title>
-  <!-- Base styles -->
+  <title>Saami - Voice Email Assistant</title>
+
+  <!-- Base and UI styles (assuming they live next to index.html) -->
   <link rel="stylesheet" href="styles.css" />
-  <!-- UI styles (FAB, cards, modern look) -->
   <link rel="stylesheet" href="ui.css" />
 </head>
-
-  
 <body>
   <h1>Saami - Your Voice Email Assistant</h1>
 
@@ -23,9 +18,22 @@
   <!-- MAIN CONTENT (hidden until logged in) -->
   <div id="content" style="display: none;">
     <h2>📥 Latest Email</h2>
+
     <p><strong>Subject:</strong> <span id="subject"></span></p>
-    <p><strong>Body:</strong></p>
-    <p id="body"></p>
+
+    <!-- ─── BODY TOGGLE SECTION ─────────────────────────────────────────────── -->
+    <div class="body-container">
+      <div class="body-header">
+        <!-- 
+          When collapsed, we show ▶, when expanded ▼
+          JavaScript will swap the classes “collapsed”/“expanded”
+        -->
+        <span id="body-toggle" class="collapsed">▶ Body</span>
+      </div>
+      <!-- The actual body; starts hidden -->
+      <div id="body-content" class="collapsed-content"></div>
+    </div>
+    <!-- ───────────────────────────────────────────────────────────────────────── -->
 
     <!-- TWO‐LINE SUMMARY -->
     <h3>🔍 Two‐Line Summary:</h3>
@@ -46,7 +54,7 @@
     </div>
   </div>
 
-  <!-- “All done” message (starts hidden) -->
+  <!-- “All done” message (hidden until needed) -->
   <div id="doneMessage" style="display: none; font-size: 1.2rem; margin-top: 2rem;">
     ✅ All tasks done for today.
   </div>
