@@ -574,12 +574,16 @@ function handleConfirmSendFinal(answer) {
         endEditUtter.onend = () => {
           // Combine original body + last GPT draft + new edits
           const editInstructions = fsmReplyBuffer.trim();
-          const combinedPrompt =
-            `Original email:\n${lastOriginalBody}\n\n` +
-            `Previous draft:\n${lastGptDraft}\n\n` +
-            `Edit instructions:\n${editInstructions}`;
-          fsmReplyBuffer = "";
-          postToSendReplyFixed(combinedPrompt);
+       const combinedPrompt = `This was the email:
+        ${lastOriginalBody}
+        
+        This is what you just generated as a reply:
+        ${lastGptDraft}
+        
+        I want this edit to your last draft follow CAREFULLY:
+        ${editInstructions}`;
+        fsmReplyBuffer = "";
+        postToSendReplyFixed(combinedPrompt);
         };
       }, 6000);
     };
