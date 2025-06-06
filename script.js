@@ -325,8 +325,10 @@ function ensureFsmRecog() {
   };
 
   fsmRecog.onerror = (event) => {
-    console.error("FSM recognition error:", event.error);
-    fsmPhase = "idle";
+    if (event.error !== "aborted") {
+      console.error("FSM recognition error:", event.error);
+      fsmPhase = "idle";
+    }
   };
 
   fsmRecog.onend = () => {
@@ -341,7 +343,7 @@ function ensureFsmRecog() {
 
 // 3) Handle “askReplaySummary” answers
 function handleAskReplaySummary(answer) {
-  //fsmRecog.stop();
+  fsmRecog.stop();
 
   if (answer.includes("yes")) {
     const summaryText = document.getElementById("summary").innerText || "";
@@ -424,57 +426,35 @@ function startFixedLengthRecordingFSM() {
   };
 }
 
-// 6) Accumulate final transcripts during fixed recording
-function handleRecordReplyFixed(event) {
-  const transcript = event.results[event.resultIndex][0].transcript.trim();
-  if (transcript) {
-    fsmReplyBuffer += transcript + " ";
-  }
-}
+function handleAskRecordReply(answer) {
+  // Stop the one-shot recognizer that was listening for “yes/no”
+  fsmRecog.stop();
 
-// 7) Send user’s spoken reply to AI, then ask to read it back
-async function postToSendReplyFixed(replyText) {
-  if (!replyText) {
-    alert("No reply detected.");
-    fsmPhase = "idle";
-    return;
-  }
-  try {
-    const res = await fetch(`${BASE_URL}/send_reply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        reply: replyText,
-        msg_id: currentMsgId
-      })
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      alert("Error generating AI reply: " + (err.error || JSON.stringify(err)));
-      fsmPhase = "idle";
-      return;
-    }
-    const data = await res.json();
-    document.getElementById("aiReplyEditable").value = data.formatted_reply;
-
-    const askReadUtter = new SpeechSynthesisUtterance(
-      "Would you like me to read your reply? Say yes or no."
+  if (answer.includes("yes")) {
+    // Speak the “starting recording” prompt, then begin the 6-second recording
+    const startUtter = new SpeechSynthesisUtterance(
+      "Starting recording. You have six seconds."
     );
-    askReadUtter.lang = "en-US";
-    speechSynthesis.speak(askReadUtter);
-    askReadUtter.onend = () => {
-      fsmPhase = "confirmReadReply";
-      fsmRecog.interimResults = false;
-      fsmRecog.continuous = false;
+    startUtter.lang = "en-US";
+    speechSynthesis.speak(startUtter);
+    startUtter.onend = () => {
+      fsmPhase = "recordReplyFixed";
+      startFixedLengthRecordingFSM();
+    };
+  } else if (answer.includes("no")) {
+    fsmPhase = "idle";
+  } else {
+    const retryUtter = new SpeechSynthesisUtterance(
+      "Please say yes to record your reply, or no to skip."
+    );
+    retryUtter.lang = "en-US";
+    speechSynthesis.speak(retryUtter);
+    retryUtter.onend = () => {
       fsmRecog.start();
     };
-  } catch (e) {
-    console.error(e);
-    alert("Failed to generate AI reply.");
-    fsmPhase = "idle";
   }
 }
+
 
 // 8) Handle “confirmReadReply” answers
 function handleConfirmReadReply(answer) {
