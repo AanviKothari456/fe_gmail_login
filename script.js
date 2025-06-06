@@ -56,9 +56,7 @@ async function loadEmailById(msgId) {
     toggleEl.className = "collapsed";
     toggleEl.innerText = "▶ Body";
     bodyEl.className = "collapsed-content";
-    bodyEl.innerHTML = data.body_html || "";  
-    // if data.body_html is empty, this will simply inject an empty string
-
+    bodyEl.innerHTML = data.body_html || "";
     document.getElementById("summary").innerText = data.summary || "";
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
@@ -83,7 +81,6 @@ window.onload = () => {
 
 // 3) TOGGLE BODY EXPANSION/COLLAPSE
 document.addEventListener("click", (e) => {
-  // If the click was on the toggle header, swap classes and arrow
   if (e.target.id === "body-toggle") {
     const toggleEl = e.target;
     const bodyEl = document.getElementById("body-content");
@@ -259,116 +256,212 @@ function showAllDoneMessage() {
   document.getElementById("doneMessage").style.display = "block";
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Hands‐Free Workflow: one button orchestrates read-summary → record → AI‐reply → send/skip
 
+// ────────────────────────────────────────────────────────────────────────────
+// HANDS-FREE: Single-Recognizer FSM, 5 s Idle-Timeout Version
+
+let fsmRecog = null;
+let fsmPhase = "idle";          // "idle" | "askReplaySummary" | "askRecordReply" | "recordReply" | "confirmSend"
+let fsmReplyBuffer = "";
+let fsmPauseTimer = null;
+
+// 1) Called by the new "Hands Free" button
 function handsFreeFlow() {
-  // Phase 1: Read the two‐line summary aloud, then ask “start recording?”
-  const summaryText = document.getElementById("summary").innerText || "";
-  if (!summaryText) {
-    alert("No summary available.");
-    return;
-  }
-  const utter = new SpeechSynthesisUtterance(summaryText);
+  // If we're already in the middle of an FSM run, do nothing
+  if (fsmPhase !== "idle") return;
+
+  // Move into phase “askReplaySummary”
+  fsmPhase = "askReplaySummary";
+
+  ensureFsmRecog();
+  fsmRecog.interimResults = false;
+  fsmRecog.continuous = false;
+
+  // Prompt: ask if the user wants to hear the summary again
+  const utter = new SpeechSynthesisUtterance(
+    "Would you like to listen to the summary again? Say yes or no."
+  );
   utter.lang = "en-US";
   speechSynthesis.speak(utter);
 
   utter.onend = () => {
-    const confirmUtter = new SpeechSynthesisUtterance(
-      "Do you want to start recording your reply? Say yes or no."
-    );
-    confirmUtter.lang = "en-US";
-    speechSynthesis.speak(confirmUtter);
-    confirmUtter.onend = () => {
-      listenForStartConfirmation();
-    };
+    fsmRecog.start();
   };
 }
 
-function listenForStartConfirmation() {
+// 2) Ensure our single FSM recognizer exists and configure handlers
+function ensureFsmRecog() {
+  if (fsmRecog) return;
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    alert("Speech recognition not supported.");
+    alert("Speech recognition not supported in this browser.");
+    fsmPhase = "idle";
     return;
   }
-  const confirmRecog = new SpeechRecognition();
-  confirmRecog.lang = "en-US";
-  confirmRecog.continuous = false;
 
-  confirmRecog.onresult = (event) => {
-    const answer = event.results[0][0].transcript.toLowerCase();
-    if (answer.includes("yes")) {
-      startReplyRecording();
-    } else if (answer.includes("no")) {
-      // Do nothing, end flow
-    } else {
-      const retryUtter = new SpeechSynthesisUtterance(
-        "Please say yes to start recording, or no to cancel."
+  fsmRecog = new SpeechRecognition();
+  fsmRecog.lang = "en-US";
+
+  fsmRecog.onresult = (event) => {
+    // Combine all transcript chunks (interim + final) into one string
+    const transcript = Array.from(event.results)
+      .map(r => r[0].transcript)
+      .join(" ")
+      .trim()
+      .toLowerCase();
+
+    switch (fsmPhase) {
+      case "askReplaySummary":
+        handleAskReplaySummary(transcript);
+        break;
+
+      case "askRecordReply":
+        handleAskRecordReply(transcript);
+        break;
+
+      case "recordReply":
+        handleRecordReply(event);
+        break;
+
+      case "confirmSend":
+        handleConfirmSend(transcript);
+        break;
+
+      default:
+        break;
+    }
+  };
+
+  fsmRecog.onerror = (event) => {
+    console.error("FSM recognition error:", event.error);
+    // Reset FSM if something goes wrong
+    fsmPhase = "idle";
+    clearTimeout(fsmPauseTimer);
+  };
+
+  fsmRecog.onend = () => {
+    // If we just finished “recordReply,” that means the 5 s timer fired
+    if (fsmPhase === "recordReply") {
+      fsmPhase = "confirmSend";
+      postToSendReply(fsmReplyBuffer.trim());
+    }
+    // Otherwise, do nothing; other phases explicitly call .start() again
+  };
+}
+
+// 3) Handle “askReplaySummary” answers
+function handleAskReplaySummary(answer) {
+  fsmRecog.stop();
+
+  if (answer.includes("yes")) {
+    const summaryText = document.getElementById("summary").innerText || "";
+    if (!summaryText) {
+      alert("No summary available.");
+      fsmPhase = "idle";
+      return;
+    }
+    // Read summary again
+    const replayUtter = new SpeechSynthesisUtterance(summaryText);
+    replayUtter.lang = "en-US";
+    speechSynthesis.speak(replayUtter);
+
+    replayUtter.onend = () => {
+      fsmPhase = "askRecordReply";
+      const askUtter = new SpeechSynthesisUtterance(
+        "Would you like to record a reply? Say yes or no."
       );
-      retryUtter.lang = "en-US";
-      speechSynthesis.speak(retryUtter);
-      retryUtter.onend = () => {
-        listenForStartConfirmation();
+      askUtter.lang = "en-US";
+      speechSynthesis.speak(askUtter);
+      askUtter.onend = () => {
+        fsmRecog.start();
       };
-    }
-  };
+    };
 
-  confirmRecog.onerror = (event) => {
-    console.error("Start confirmation recognition error:", event.error);
-    alert("Could not understand. Please click 'Hands Free' and try again.");
-  };
-
-  confirmRecog.start();
+  } else if (answer.includes("no")) {
+    fsmPhase = "idle";
+  } else {
+    // Didn’t catch yes/no
+    const retryUtter = new SpeechSynthesisUtterance(
+      "Please say yes to hear the summary, or no to cancel."
+    );
+    retryUtter.lang = "en-US";
+    speechSynthesis.speak(retryUtter);
+    retryUtter.onend = () => {
+      fsmRecog.start();
+    };
+  }
 }
 
-function startReplyRecording() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    alert("Speech recognition not supported.");
-    return;
+// 4) Handle “askRecordReply” answers
+function handleAskRecordReply(answer) {
+  fsmRecog.stop();
+
+  if (answer.includes("yes")) {
+    fsmPhase = "recordReply";
+    startRecordingReplyFSM();
+  } else if (answer.includes("no")) {
+    fsmPhase = "idle";
+  } else {
+    const retryUtter = new SpeechSynthesisUtterance(
+      "Please say yes to record your reply, or no to skip."
+    );
+    retryUtter.lang = "en-US";
+    speechSynthesis.speak(retryUtter);
+    retryUtter.onend = () => {
+      fsmRecog.start();
+    };
   }
+}
 
-  const replyRecog = new SpeechRecognition();
-  replyRecog.lang = "en-US";
-  replyRecog.continuous = true;
+// 5) Begin recording the user’s reply (FSM style) using idle timeout
+function startRecordingReplyFSM() {
+  fsmReplyBuffer = "";
+  clearTimeout(fsmPauseTimer);
 
-  let collectedReply = "";
+  fsmRecog.interimResults = true;  // capture partial transcripts too
+  fsmRecog.continuous = true;
 
-  replyRecog.onresult = (event) => {
-    // Grab the most recent transcript chunk
-    const transcript = event.results[event.results.length - 1][0].transcript;
-    if (transcript.toLowerCase().includes("stop recording")) {
-      replyRecog.stop();
-    } else {
-      collectedReply += transcript + " ";
-    }
-  };
-
-  replyRecog.onerror = (event) => {
-    console.error("Reply recognition error:", event.error);
-    alert("Error during reply recording.");
-  };
-
-  replyRecog.onend = () => {
-    // Phase 3 done: send collectedReply to AI and read out response
-    postToSendReply(collectedReply.trim());
-  };
-
-  // Prompt user that recording is starting
   const startUtter = new SpeechSynthesisUtterance(
-    "Recording started. Say 'stop recording' when you are done."
+    "Recording started. Please speak your reply. I will stop when you pause for five seconds."
   );
   startUtter.lang = "en-US";
   speechSynthesis.speak(startUtter);
 
   startUtter.onend = () => {
-    replyRecog.start();
+    // As soon as TTS finishes, start listening
+    fsmRecog.start();
+    // Kick off an initial 5 s timer in case user stays silent
+    fsmPauseTimer = setTimeout(() => {
+      fsmRecog.stop();
+    }, 5000);
   };
 }
 
+// 6) On every result (interim or final), append finals and reset idle timer
+function handleRecordReply(event) {
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const result = event.results[i];
+    // Only append if it's final
+    if (result.isFinal) {
+      const finalText = result[0].transcript.trim();
+      if (finalText) {
+        fsmReplyBuffer += finalText + " ";
+      }
+    }
+  }
+  // Reset our 5 s idle timer whenever ANY result arrives
+  clearTimeout(fsmPauseTimer);
+  fsmPauseTimer = setTimeout(() => {
+    fsmRecog.stop();  // no speech for 5 s → end recording
+  }, 5000);
+}
+
+// 7) Send user’s spoken reply to AI, then read AI response
 async function postToSendReply(replyText) {
   if (!replyText) {
     alert("No reply detected.");
+    fsmPhase = "idle";
     return;
   }
   try {
@@ -383,66 +476,51 @@ async function postToSendReply(replyText) {
     });
     if (!res.ok) {
       const err = await res.json();
-      return alert("Error generating AI reply: " + (err.error || JSON.stringify(err)));
+      alert("Error generating AI reply: " + (err.error || JSON.stringify(err)));
+      fsmPhase = "idle";
+      return;
     }
     const data = await res.json();
     document.getElementById("aiReplyEditable").value = data.formatted_reply;
-    // Phase 4: read the AI’s reply and ask “yes to send or no to skip”
-    readGeneratedReply();
+
+    // Now read AI’s reply and ask send/skip
+    const aiText = data.formatted_reply;
+    const sendPrompt = new SpeechSynthesisUtterance(
+      aiText + ". . . Say yes to send or next to skip."
+    );
+    sendPrompt.lang = "en-US";
+    speechSynthesis.speak(sendPrompt);
+    sendPrompt.onend = () => {
+      fsmPhase = "confirmSend";
+      fsmRecog.interimResults = false;
+      fsmRecog.continuous = false;
+      fsmRecog.start();
+    };
   } catch (e) {
     console.error(e);
     alert("Failed to generate AI reply.");
+    fsmPhase = "idle";
   }
 }
 
-function readGeneratedReply() {
-  const replyText = document.getElementById("aiReplyEditable").value || "";
-  if (!replyText) {
-    alert("No AI reply to read.");
+// 8) Handle “confirmSend” response
+function handleConfirmSend(answer) {
+  fsmRecog.stop();
+
+  if (answer.includes("yes")) {
+    actuallySendEmail();
+  } else if (answer.includes("next") || answer.includes("no")) {
+    goToNextEmail(false);
+  } else {
+    const retryUtter = new SpeechSynthesisUtterance(
+      "Please say yes to send or next to skip."
+    );
+    retryUtter.lang = "en-US";
+    speechSynthesis.speak(retryUtter);
+    retryUtter.onend = () => {
+      fsmRecog.start();
+    };
     return;
   }
-  const utter = new SpeechSynthesisUtterance(
-    replyText + ". . . Say yes to send or no to skip."
-  );
-  utter.lang = "en-US";
-  speechSynthesis.speak(utter);
-  utter.onend = () => {
-    listenForSendOrSkip();
-  };
-}
-
-function listenForSendOrSkip() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    alert("Speech recognition not supported.");
-    return;
-  }
-  const sendRecog = new SpeechRecognition();
-  sendRecog.lang = "en-US";
-  sendRecog.continuous = false;
-
-  sendRecog.onresult = (event) => {
-    const answer = event.results[0][0].transcript.toLowerCase();
-    if (answer.includes("yes")) {
-      actuallySendEmail();
-    } else if (answer.includes("no")) {
-      goToNextEmail(false);
-    } else {
-      const retryUtter = new SpeechSynthesisUtterance(
-        "Please say yes to send or no to skip."
-      );
-      retryUtter.lang = "en-US";
-      speechSynthesis.speak(retryUtter);
-      retryUtter.onend = () => {
-        listenForSendOrSkip();
-      };
-    }
-  };
-
-  sendRecog.onerror = (event) => {
-    console.error("Send/skip recognition error:", event.error);
-    alert("Could not understand. Please try again.");
-  };
-
-  sendRecog.start();
+  fsmPhase = "idle";
 }
