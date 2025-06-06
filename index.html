@@ -18,7 +18,11 @@
     <p><strong>Subject:</strong> <span id="subject"></span></p>
     <p><strong>Body:</strong></p>
     <p id="body"></p>
-    <audio id="emailAudio" controls></audio>
+
+    <!-- TWO‐LINE SUMMARY -->
+    <h3>🔍 Two‐Line Summary:</h3>
+    <p id="summary" style="font-style: italic; margin-bottom: 1rem;"></p>
+    <button onclick="readSummary()">🔊 Read Summary Aloud</button>
 
     <h3>🎤 Reply</h3>
     <button id="startBtn" onclick="startRecording()">Start Recording</button>
