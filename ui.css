@@ -130,3 +130,33 @@ audio {
   color: #4b5563; /* gray-700 */
   padding: 2rem;
 }
+
+
+
+/* By default, collapsed-content is hidden */
+.collapsed-content {
+  display: none;
+}
+
+/* When expanded, we make the body visible */
+.expanded-content {
+  display: block;
+}
+
+/* Style the toggle header (“▶ Body” / “▼ Body”) */
+#body-toggle {
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+/* Slight indent for the body HTML */
+#body-content {
+  margin-left: 1rem;
+  margin-bottom: 1rem;
+  border-left: 3px solid #e5e7eb; /* light gray line on left */
+  padding-left: 1rem;
+}
+
