@@ -20,13 +20,10 @@ async function loadEmail() {
     document.getElementById("subject").innerText = data.subject || "(No subject)";
     document.getElementById("body").innerText = data.body || "(No body)";
 
-    // Populate the two‐line summary field
+    // Populate the two‐line summary field (no automatic reading)
     document.getElementById("summary").innerText = data.summary || "(No summary)";
 
     document.getElementById("content").style.display = "block";
-
-    // Automatically read the summary aloud
-    readSummary(data.summary || "");
   } catch (err) {
     console.error("Error loading email:", err);
     alert("Something went wrong while fetching your email.");
@@ -43,10 +40,10 @@ window.onload = () => {
 };
 
 // 2) SPEECH SYNTHESIS FOR SUMMARY
-function readSummary(text) {
-  const content = text || document.getElementById("summary").innerText;
-  if (!content) return;
-  const utter = new SpeechSynthesisUtterance(content);
+function readSummary() {
+  const text = document.getElementById("summary").innerText;
+  if (!text || text === "(No summary)") return;
+  const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "en-US";
   speechSynthesis.speak(utter);
 }
@@ -107,7 +104,7 @@ async function sendReply() {
   document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// 5) READ OUT-and-ASK “SEND?” then listen for yes/no
+// 5) READ OUT and ASK “SEND?” then listen for yes/no
 function readAndConfirmReply() {
   const textToRead = document.getElementById("aiReplyEditable").value.trim();
   if (!textToRead) {
