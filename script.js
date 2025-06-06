@@ -58,10 +58,10 @@ async function loadEmailById(msgId) {
     bodyEl.className = "collapsed-content";
     bodyEl.innerHTML = data.body_html || "";  
     // if data.body_html is empty, this will simply inject an empty string
-
+    document.getElementById("summary").innerText = data.summary || "";
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
-
+    
     document.getElementById("transcript").innerText = "";
     document.getElementById("transcript").dataset.reply = "";
     document.getElementById("aiReplyEditable").value = "";
