@@ -258,7 +258,7 @@ function showAllDoneMessage() {
 
 
 // ────────────────────────────────────────────────────────────────────────────
-// HANDS-FREE: Fixed-Length Recording (6s) FSM Implementation
+// HANDS-FREE: Fixed-Length (6s) FSM Implementation, with correct phase transitions
 
 let fsmRecog = null;
 let fsmPhase = "idle";          // "idle" | "askReplaySummary" | "askRecordReply" | "recordReplyFixed" | "confirmReadReply"
@@ -270,6 +270,8 @@ function handsFreeFlow() {
 
   fsmPhase = "askReplaySummary";
   ensureFsmRecog();
+
+  // In askReplaySummary, we want only one-shot listen
   fsmRecog.interimResults = false;
   fsmRecog.continuous = false;
 
@@ -328,11 +330,12 @@ function ensureFsmRecog() {
   };
 
   fsmRecog.onend = () => {
-    // If we were in recordReplyFixed, now time to send to AI
+    // If we were recording, now move to sending
     if (fsmPhase === "recordReplyFixed") {
       fsmPhase = "confirmReadReply";
       postToSendReplyFixed(fsmReplyBuffer.trim());
     }
+    // Otherwise, do nothing; each phase calls start() explicitly
   };
 }
 
@@ -416,14 +419,13 @@ function startFixedLengthRecordingFSM() {
       const endUtter = new SpeechSynthesisUtterance("Ending recording.");
       endUtter.lang = "en-US";
       speechSynthesis.speak(endUtter);
-      // When this TTS finishes, fsmRecog.onend will fire and move to confirmReadReply
+      // After this TTS ends, fsmRecog.onend will fire to move to confirmReadReply
     }, 6000);
   };
 }
 
 // 6) Accumulate final transcripts during fixed recording
 function handleRecordReplyFixed(event) {
-  // event.results contains final transcripts only
   const transcript = event.results[event.resultIndex][0].transcript.trim();
   if (transcript) {
     fsmReplyBuffer += transcript + " ";
