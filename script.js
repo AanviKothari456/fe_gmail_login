@@ -56,7 +56,7 @@ async function loadEmailById(msgId) {
     toggleEl.className = "collapsed";
     toggleEl.innerText = "▶ Body";
     bodyEl.className = "collapsed-content";
-    bodyEl.innerHTML = data.body_html || "";  
+    bodyEl.innerHTML = data.body_html || "";
     document.getElementById("summary").innerText = data.summary || "";
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
@@ -175,6 +175,7 @@ async function postToSendReplyFixed(replyText) {
     const data = await res.json();
     document.getElementById("aiReplyEditable").value = data.formatted_reply;
 
+    // Ask if user wants to hear the AI-generated reply
     const askReadUtter = new SpeechSynthesisUtterance(
       "Would you like me to read your reply? Say yes or no."
     );
@@ -193,7 +194,7 @@ async function postToSendReplyFixed(replyText) {
   }
 }
 
-// 6) GENERATE AI REPLY (include currentMsgId)
+// 6) GENERATE AI REPLY (include currentMsgId) – for manual reply button
 async function sendReply() {
   const userInstruction = document.getElementById("transcript").dataset.reply || "";
   const res = await fetch(`${BASE_URL}/send_reply`, {
@@ -215,7 +216,7 @@ async function sendReply() {
   document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// 7) READ OUT and ASK FOR “YES” vs “NEXT”
+// 7) READ OUT and ASK FOR “YES” vs “NEXT” – for manual read/send
 function readAndConfirmReply() {
   const textToRead = document.getElementById("aiReplyEditable").value || "";
   const utterance = new SpeechSynthesisUtterance(
@@ -313,7 +314,7 @@ function showAllDoneMessage() {
 // HANDS-FREE: Fixed-Length (6s) FSM Implementation, with correct phase transitions
 
 let fsmRecog = null;
-let fsmPhase = "idle";          // "idle" | "askReplaySummary" | "askRecordReply" | "recordReplyFixed" | "confirmReadReply"
+let fsmPhase = "idle";          // "idle" | "askReplaySummary" | "askRecordReply" | "recordReplyFixed" | "confirmReadReply" | "confirmSendFinal"
 let fsmReplyBuffer = "";
 
 // 1) Called by the new "Hands Free" button
@@ -371,6 +372,10 @@ function ensureFsmRecog() {
         handleConfirmReadReply(transcript);
         break;
 
+      case "confirmSendFinal":
+        handleConfirmSendFinal(transcript);
+        break;
+
       default:
         break;
     }
@@ -384,7 +389,7 @@ function ensureFsmRecog() {
   };
 
   fsmRecog.onend = () => {
-    // If we were recording, now move to sending
+    // If we were recording, now move to sending phase
     if (fsmPhase === "recordReplyFixed") {
       fsmPhase = "confirmReadReply";
       postToSendReplyFixed(fsmReplyBuffer.trim());
@@ -437,53 +442,7 @@ function handleAskRecordReply(answer) {
   fsmRecog.stop();
 
   if (answer.includes("yes")) {
-    fsmPhase = "recordReplyFixed";
-    startFixedLengthRecordingFSM();
-  } else if (answer.includes("no")) {
-    fsmPhase = "idle";
-  } else {
-    const retryUtter = new SpeechSynthesisUtterance(
-      "Please say yes to record your reply, or no to skip."
-    );
-    retryUtter.lang = "en-US";
-    speechSynthesis.speak(retryUtter);
-    retryUtter.onend = () => {
-      fsmRecog.start();
-    };
-  }
-}
-
-// 5) Begin fixed-length (6s) recording
-function startFixedLengthRecordingFSM() {
-  fsmReplyBuffer = "";
-  fsmRecog.interimResults = false;
-  fsmRecog.continuous = true;
-
-  const startUtter = new SpeechSynthesisUtterance(
-    "Starting recording. You have six seconds."
-  );
-  startUtter.lang = "en-US";
-  speechSynthesis.speak(startUtter);
-
-  startUtter.onend = () => {
-    fsmRecog.start();
-    // Stop after exactly 6 seconds
-    setTimeout(() => {
-      fsmRecog.stop();
-      const endUtter = new SpeechSynthesisUtterance("Ending recording.");
-      endUtter.lang = "en-US";
-      speechSynthesis.speak(endUtter);
-      // After this TTS ends, fsmRecog.onend will fire to move to confirmReadReply
-    }, 6000);
-  };
-}
-
-function handleAskRecordReply(answer) {
-  // Stop the one-shot recognizer that was listening for “yes/no”
-  fsmRecog.stop();
-
-  if (answer.includes("yes")) {
-    // Speak the “starting recording” prompt, then begin the 6-second recording
+    // Speak the “starting recording” prompt, then begin six-second recording
     const startUtter = new SpeechSynthesisUtterance(
       "Starting recording. You have six seconds."
     );
@@ -507,8 +466,37 @@ function handleAskRecordReply(answer) {
   }
 }
 
+// 5) Begin fixed-length (6s) recording
+function startFixedLengthRecordingFSM() {
+  fsmReplyBuffer = "";
+  fsmRecog.interimResults = false;
+  fsmRecog.continuous = true;
 
-// 8) Handle “confirmReadReply” answers
+  const startUtter = new SpeechSynthesisUtterance(
+    "Recording started. You have six seconds."
+  );
+  startUtter.lang = "en-US";
+  speechSynthesis.speak(startUtter);
+
+  startUtter.onend = () => {
+    fsmRecog.start();
+    // Stop after exactly six seconds
+    setTimeout(() => {
+      fsmRecog.stop();
+      const endUtter = new SpeechSynthesisUtterance("Ending recording.");
+      endUtter.lang = "en-US";
+      speechSynthesis.speak(endUtter);
+      // After this TTS ends, fsmRecog.onend will fire and call postToSendReplyFixed
+    }, 6000);
+  };
+}
+
+// 6) Accumulate final transcripts during fixed recording (already defined above)
+
+// 7) postToSendReplyFixed sends to AI then asks to read
+// (already defined above)
+
+// 8) Handle “confirmReadReply” answers (reads then asks send/next)
 function handleConfirmReadReply(answer) {
   fsmRecog.stop();
 
@@ -518,7 +506,79 @@ function handleConfirmReadReply(answer) {
       const readUtter = new SpeechSynthesisUtterance(toRead);
       readUtter.lang = "en-US";
       speechSynthesis.speak(readUtter);
+      readUtter.onend = () => {
+        // After reading, ask send or skip
+        const askSendUtter = new SpeechSynthesisUtterance(
+          "Say yes to send or next to skip."
+        );
+        askSendUtter.lang = "en-US";
+        speechSynthesis.speak(askSendUtter);
+        askSendUtter.onend = () => {
+          fsmPhase = "confirmSendFinal";
+          fsmRecog.interimResults = false;
+          fsmRecog.continuous = false;
+          fsmRecog.start();
+        };
+      };
+    } else {
+      // If somehow empty, skip directly to send prompt
+      const askSendUtter = new SpeechSynthesisUtterance(
+        "Say yes to send or next to skip."
+      );
+      askSendUtter.lang = "en-US";
+      speechSynthesis.speak(askSendUtter);
+      askSendUtter.onend = () => {
+        fsmPhase = "confirmSendFinal";
+        fsmRecog.interimResults = false;
+        fsmRecog.continuous = false;
+        fsmRecog.start();
+      };
     }
+  } else if (answer.includes("no")) {
+    // Skip directly to send prompt
+    const askSendUtter = new SpeechSynthesisUtterance(
+      "Say yes to send or next to skip."
+    );
+    askSendUtter.lang = "en-US";
+    speechSynthesis.speak(askSendUtter);
+    askSendUtter.onend = () => {
+      fsmPhase = "confirmSendFinal";
+      fsmRecog.interimResults = false;
+      fsmRecog.continuous = false;
+      fsmRecog.start();
+    };
+  } else {
+    // Invalid response: ask again
+    const retry = new SpeechSynthesisUtterance(
+      "Please say yes to hear the reply, or no to skip."
+    );
+    retry.lang = "en-US";
+    speechSynthesis.speak(retry);
+    retry.onend = () => {
+      fsmRecog.start();
+    };
+    return;
+  }
+}
+
+// 9) Handle “confirmSendFinal” answers (yes → send, next → skip)
+function handleConfirmSendFinal(answer) {
+  fsmRecog.stop();
+
+  if (answer.includes("yes")) {
+    actuallySendEmail();
+  } else if (answer.includes("next")) {
+    goToNextEmail(false);
+  } else {
+    const retry = new SpeechSynthesisUtterance(
+      "Please say yes to send or next to skip."
+    );
+    retry.lang = "en-US";
+    speechSynthesis.speak(retry);
+    retry.onend = () => {
+      fsmRecog.start();
+    };
+    return;
   }
   fsmPhase = "idle";
 }
