@@ -35,6 +35,8 @@ async function loadInitial() {
 }
 
 // 2) LOAD A SINGLE EMAIL BY ID (now uses body_html)
+let lastOriginalBody = ""; // store actual plain-text body for editing prompts
+
 async function loadEmailById(msgId) {
   try {
     currentMsgId = msgId;
@@ -61,6 +63,9 @@ async function loadEmailById(msgId) {
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
 
+    // Also store the plain-text portion for editing prompts
+    lastOriginalBody = data.body_text || stripHtml(data.body_html || "");
+
     document.getElementById("transcript").innerText = "";
     document.getElementById("transcript").dataset.reply = "";
     document.getElementById("aiReplyEditable").value = "";
@@ -68,6 +73,13 @@ async function loadEmailById(msgId) {
     console.error("Error loading email by ID:", err);
     alert("Something went wrong while fetching the email.");
   }
+}
+
+// Utility to strip HTML tags if needed
+function stripHtml(html) {
+  const tmp = document.createElement("DIV");
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || "";
 }
 
 window.onload = () => {
@@ -149,7 +161,7 @@ function handleRecordReplyFixed(event) {
   }
 }
 
-// 7) Send user’s spoken reply to AI, then ask to read it back
+// 7) Send user’s spoken reply (or instructions) to AI, then ask to read
 async function postToSendReplyFixed(replyText) {
   if (!replyText) {
     alert("No reply detected.");
@@ -162,6 +174,7 @@ async function postToSendReplyFixed(replyText) {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({
+        // For edits, replyText can be a composite instruction string
         reply: replyText,
         msg_id: currentMsgId
       })
@@ -173,7 +186,8 @@ async function postToSendReplyFixed(replyText) {
       return;
     }
     const data = await res.json();
-    document.getElementById("aiReplyEditable").value = data.formatted_reply;
+    const newDraft = data.formatted_reply;
+    document.getElementById("aiReplyEditable").value = newDraft;
 
     // Ask if user wants to hear the AI-generated reply
     const askReadUtter = new SpeechSynthesisUtterance(
@@ -194,7 +208,7 @@ async function postToSendReplyFixed(replyText) {
   }
 }
 
-// 6) GENERATE AI REPLY (include currentMsgId) – for manual reply button
+// 8) GENERATE AI REPLY (include currentMsgId) – for manual reply button
 async function sendReply() {
   const userInstruction = document.getElementById("transcript").dataset.reply || "";
   const res = await fetch(`${BASE_URL}/send_reply`, {
@@ -216,7 +230,7 @@ async function sendReply() {
   document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// 7) READ OUT and ASK FOR “YES” vs “NEXT” – for manual read/send
+// 9) READ OUT and ASK FOR “YES” vs “NEXT” – for manual read/send
 function readAndConfirmReply() {
   const textToRead = document.getElementById("aiReplyEditable").value || "";
   const utterance = new SpeechSynthesisUtterance(
@@ -267,7 +281,7 @@ function listenForConfirmation() {
   ConfirmRecog.start();
 }
 
-// 8) SEND VIA GMAIL or SKIP, THEN ADVANCE INDEX
+// 10) SEND VIA GMAIL or SKIP, THEN ADVANCE INDEX
 async function actuallySendEmail() {
   const finalText = document.getElementById("aiReplyEditable").value || "";
   const res = await fetch(`${BASE_URL}/send_email`, {
@@ -303,28 +317,31 @@ function goToNextEmail(justSent) {
   }
 }
 
-// 9) SHOW “ALL DONE” and HIDE EVERYTHING ELSE
+// 11) SHOW “ALL DONE” and HIDE EVERYTHING ELSE
 function showAllDoneMessage() {
   document.getElementById("content").style.display = "none";
+  document.getElementById("doneMessage").innerText = "All emails read!";
   document.getElementById("doneMessage").style.display = "block";
 }
 
 
 // ────────────────────────────────────────────────────────────────────────────
-// HANDS-FREE: Fixed-Length (6s) FSM Implementation, with correct phase transitions
+// HANDS-FREE: Extended FSM with “edit” loop
 
 let fsmRecog = null;
-let fsmPhase = "idle";          // "idle" | "askReplaySummary" | "askRecordReply" | "recordReplyFixed" | "confirmReadReply" | "confirmSendFinal"
-let fsmReplyBuffer = "";
+let fsmPhase = "idle";          
+// "idle" | "askReplaySummary" | "askRecordReply" | "recordReplyFixed" 
+// | "confirmReadReply" | "confirmSendFinal" | "collectEditInstructions"
+let fsmReplyBuffer = "";         // holds user’s spoken reply or edit instructions
+let lastGptDraft = "";           // holds the most recent AI-generated reply
 
-// 1) Called by the new "Hands Free" button
+// 1) HANDS-FREE ENTRY
 function handsFreeFlow() {
   if (fsmPhase !== "idle") return;
 
   fsmPhase = "askReplaySummary";
   ensureFsmRecog();
 
-  // In askReplaySummary, we want only one-shot listen
   fsmRecog.interimResults = false;
   fsmRecog.continuous = false;
 
@@ -338,7 +355,7 @@ function handsFreeFlow() {
   };
 }
 
-// 2) Ensure single FSM recognizer exists
+// 2) ENSURE FSM RECOGNIZER SETUP
 function ensureFsmRecog() {
   if (fsmRecog) return;
 
@@ -354,28 +371,25 @@ function ensureFsmRecog() {
 
   fsmRecog.onresult = (event) => {
     const transcript = event.results[0][0].transcript.trim().toLowerCase();
-
     switch (fsmPhase) {
       case "askReplaySummary":
         handleAskReplaySummary(transcript);
         break;
-
       case "askRecordReply":
         handleAskRecordReply(transcript);
         break;
-
       case "recordReplyFixed":
         handleRecordReplyFixed(event);
         break;
-
       case "confirmReadReply":
         handleConfirmReadReply(transcript);
         break;
-
       case "confirmSendFinal":
         handleConfirmSendFinal(transcript);
         break;
-
+      case "collectEditInstructions":
+        handleCollectEditInstructions(transcript);
+        break;
       default:
         break;
     }
@@ -389,19 +403,30 @@ function ensureFsmRecog() {
   };
 
   fsmRecog.onend = () => {
-    // If we were recording, now move to sending phase
     if (fsmPhase === "recordReplyFixed") {
+      // Turn to confirmReadReply phase
       fsmPhase = "confirmReadReply";
+      // Store last GPT draft from textarea
+      lastGptDraft = document.getElementById("aiReplyEditable").value.trim();
       postToSendReplyFixed(fsmReplyBuffer.trim());
+    } else if (fsmPhase === "collectEditInstructions") {
+      // After collecting instructions, combine and re-prompt GPT
+      fsmPhase = "confirmReadReply"; 
+      const editInstructions = fsmReplyBuffer.trim();
+      const combinedPrompt = 
+        `Original email:\n${lastOriginalBody}\n\n` +
+        `Previous draft:\n${lastGptDraft}\n\n` +
+        `Edit instructions:\n${editInstructions}`;
+      fsmReplyBuffer = ""; // Clear buffer
+      postToSendReplyFixed(combinedPrompt);
     }
-    // Otherwise, do nothing; each phase calls start() explicitly
+    // Other phases explicitly restart fsmRecog.start() as needed
   };
 }
 
-// 3) Handle “askReplaySummary” answers
+// 3) HANDLE “askReplaySummary”
 function handleAskReplaySummary(answer) {
   fsmRecog.stop();
-
   if (answer.includes("yes")) {
     const summaryText = document.getElementById("summary").innerText || "";
     if (!summaryText) {
@@ -437,14 +462,12 @@ function handleAskReplaySummary(answer) {
   }
 }
 
-// 4) Handle “askRecordReply” answers
+// 4) HANDLE “askRecordReply”
 function handleAskRecordReply(answer) {
   fsmRecog.stop();
-
   if (answer.includes("yes")) {
-    // Speak the “starting recording” prompt, then begin six-second recording
     const startUtter = new SpeechSynthesisUtterance(
-      "Starting recording. You have six seconds."
+      "Recording started. You have six seconds."
     );
     startUtter.lang = "en-US";
     speechSynthesis.speak(startUtter);
@@ -466,40 +489,26 @@ function handleAskRecordReply(answer) {
   }
 }
 
-// 5) Begin fixed-length (6s) recording
+// 5) BEGIN fixed-length (6s) recording
 function startFixedLengthRecordingFSM() {
   fsmReplyBuffer = "";
   fsmRecog.interimResults = false;
   fsmRecog.continuous = true;
 
-  const startUtter = new SpeechSynthesisUtterance(
-    "Recording started. You have six seconds."
-  );
-  startUtter.lang = "en-US";
-  speechSynthesis.speak(startUtter);
-
-  startUtter.onend = () => {
-    fsmRecog.start();
-    // Stop after exactly six seconds
-    setTimeout(() => {
-      fsmRecog.stop();
-      const endUtter = new SpeechSynthesisUtterance("Ending recording.");
-      endUtter.lang = "en-US";
-      speechSynthesis.speak(endUtter);
-      // After this TTS ends, fsmRecog.onend will fire and call postToSendReplyFixed
-    }, 6000);
-  };
+  // After TTS, start the six-second listen
+  fsmRecog.start();
+  setTimeout(() => {
+    fsmRecog.stop();
+    const endUtter = new SpeechSynthesisUtterance("Ending recording.");
+    endUtter.lang = "en-US";
+    speechSynthesis.speak(endUtter);
+    // onend triggers postToSendReplyFixed
+  }, 6000);
 }
 
-// 6) Accumulate final transcripts during fixed recording (already defined above)
-
-// 7) postToSendReplyFixed sends to AI then asks to read
-// (already defined above)
-
-// 8) Handle “confirmReadReply” answers (reads then asks send/next)
+// 6) HANDLE “confirmReadReply”
 function handleConfirmReadReply(answer) {
   fsmRecog.stop();
-
   if (answer.includes("yes")) {
     const toRead = document.getElementById("aiReplyEditable").value || "";
     if (toRead) {
@@ -507,9 +516,8 @@ function handleConfirmReadReply(answer) {
       readUtter.lang = "en-US";
       speechSynthesis.speak(readUtter);
       readUtter.onend = () => {
-        // After reading, ask send or skip
         const askSendUtter = new SpeechSynthesisUtterance(
-          "Say yes to send or next to skip."
+          "Say yes to send, next to skip, or edit to revise."
         );
         askSendUtter.lang = "en-US";
         speechSynthesis.speak(askSendUtter);
@@ -521,9 +529,8 @@ function handleConfirmReadReply(answer) {
         };
       };
     } else {
-      // If somehow empty, skip directly to send prompt
       const askSendUtter = new SpeechSynthesisUtterance(
-        "Say yes to send or next to skip."
+        "Say yes to send, next to skip, or edit to revise."
       );
       askSendUtter.lang = "en-US";
       speechSynthesis.speak(askSendUtter);
@@ -535,9 +542,8 @@ function handleConfirmReadReply(answer) {
       };
     }
   } else if (answer.includes("no")) {
-    // Skip directly to send prompt
     const askSendUtter = new SpeechSynthesisUtterance(
-      "Say yes to send or next to skip."
+      "Say yes to send, next to skip, or edit to revise."
     );
     askSendUtter.lang = "en-US";
     speechSynthesis.speak(askSendUtter);
@@ -548,7 +554,6 @@ function handleConfirmReadReply(answer) {
       fsmRecog.start();
     };
   } else {
-    // Invalid response: ask again
     const retry = new SpeechSynthesisUtterance(
       "Please say yes to hear the reply, or no to skip."
     );
@@ -557,21 +562,40 @@ function handleConfirmReadReply(answer) {
     retry.onend = () => {
       fsmRecog.start();
     };
-    return;
   }
 }
 
-// 9) Handle “confirmSendFinal” answers (yes → send, next → skip)
+// 7) HANDLE “confirmSendFinal”
 function handleConfirmSendFinal(answer) {
   fsmRecog.stop();
-
   if (answer.includes("yes")) {
     actuallySendEmail();
   } else if (answer.includes("next")) {
     goToNextEmail(false);
+  } else if (answer.includes("edit")) {
+    // Collect edit instructions
+    fsmPhase = "collectEditInstructions";
+    const askEditUtter = new SpeechSynthesisUtterance(
+      "Beginning recording for six seconds to collect your edits."
+    );
+    askEditUtter.lang = "en-US";
+    speechSynthesis.speak(askEditUtter);
+    askEditUtter.onend = () => {
+      fsmRecog.interimResults = false;
+      fsmRecog.continuous = true;
+      fsmReplyBuffer = "";
+      fsmRecog.start();
+      setTimeout(() => {
+        fsmRecog.stop();
+        const endEditUtter = new SpeechSynthesisUtterance("Ending edit recording.");
+        endEditUtter.lang = "en-US";
+        speechSynthesis.speak(endEditUtter);
+        // onend will trigger combine in onend handler
+      }, 6000);
+    };
   } else {
     const retry = new SpeechSynthesisUtterance(
-      "Please say yes to send or next to skip."
+      "Please say yes to send, next to skip, or edit to revise."
     );
     retry.lang = "en-US";
     speechSynthesis.speak(retry);
