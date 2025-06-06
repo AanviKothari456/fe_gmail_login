@@ -388,7 +388,7 @@ function ensureFsmRecog() {
         handleConfirmSendFinal(transcript);
         break;
       case "collectEditInstructions":
-        handleCollectEditInstructions(transcript);
+        // We don't process here; we handle in end-of-record TTS callback
         break;
       default:
         break;
@@ -403,24 +403,8 @@ function ensureFsmRecog() {
   };
 
   fsmRecog.onend = () => {
-    if (fsmPhase === "recordReplyFixed") {
-      // Turn to confirmReadReply phase
-      fsmPhase = "confirmReadReply";
-      // Store last GPT draft from textarea
-      lastGptDraft = document.getElementById("aiReplyEditable").value.trim();
-      postToSendReplyFixed(fsmReplyBuffer.trim());
-    } else if (fsmPhase === "collectEditInstructions") {
-      // After collecting instructions, combine and re-prompt GPT
-      fsmPhase = "confirmReadReply"; 
-      const editInstructions = fsmReplyBuffer.trim();
-      const combinedPrompt = 
-        `Original email:\n${lastOriginalBody}\n\n` +
-        `Previous draft:\n${lastGptDraft}\n\n` +
-        `Edit instructions:\n${editInstructions}`;
-      fsmReplyBuffer = ""; // Clear buffer
-      postToSendReplyFixed(combinedPrompt);
-    }
-    // Other phases explicitly restart fsmRecog.start() as needed
+    // For “recordReplyFixed,” transition happens in code after TTS
+    // For “collectEditInstructions,” transition happens after TTS in code
   };
 }
 
@@ -473,7 +457,21 @@ function handleAskRecordReply(answer) {
     speechSynthesis.speak(startUtter);
     startUtter.onend = () => {
       fsmPhase = "recordReplyFixed";
-      startFixedLengthRecordingFSM();
+      fsmRecog.interimResults = false;
+      fsmRecog.continuous = true;
+      fsmReplyBuffer = "";
+      fsmRecog.start();
+      setTimeout(() => {
+        fsmRecog.stop();
+        const endUtter = new SpeechSynthesisUtterance("Ending recording.");
+        endUtter.lang = "en-US";
+        speechSynthesis.speak(endUtter);
+        endUtter.onend = () => {
+          // After recording, store GPT draft, then send buffer
+          lastGptDraft = document.getElementById("aiReplyEditable").value.trim();
+          postToSendReplyFixed(fsmReplyBuffer.trim());
+        };
+      }, 6000);
     };
   } else if (answer.includes("no")) {
     fsmPhase = "idle";
@@ -489,24 +487,7 @@ function handleAskRecordReply(answer) {
   }
 }
 
-// 5) BEGIN fixed-length (6s) recording
-function startFixedLengthRecordingFSM() {
-  fsmReplyBuffer = "";
-  fsmRecog.interimResults = false;
-  fsmRecog.continuous = true;
-
-  // After TTS, start the six-second listen
-  fsmRecog.start();
-  setTimeout(() => {
-    fsmRecog.stop();
-    const endUtter = new SpeechSynthesisUtterance("Ending recording.");
-    endUtter.lang = "en-US";
-    speechSynthesis.speak(endUtter);
-    // onend triggers postToSendReplyFixed
-  }, 6000);
-}
-
-// 6) HANDLE “confirmReadReply”
+// 5) HANDLE “confirmReadReply”
 function handleConfirmReadReply(answer) {
   fsmRecog.stop();
   if (answer.includes("yes")) {
@@ -565,7 +546,7 @@ function handleConfirmReadReply(answer) {
   }
 }
 
-// 7) HANDLE “confirmSendFinal”
+// 6) HANDLE “confirmSendFinal”
 function handleConfirmSendFinal(answer) {
   fsmRecog.stop();
   if (answer.includes("yes")) {
@@ -590,7 +571,16 @@ function handleConfirmSendFinal(answer) {
         const endEditUtter = new SpeechSynthesisUtterance("Ending edit recording.");
         endEditUtter.lang = "en-US";
         speechSynthesis.speak(endEditUtter);
-        // onend will trigger combine in onend handler
+        endEditUtter.onend = () => {
+          // Combine original body + last GPT draft + new edits
+          const editInstructions = fsmReplyBuffer.trim();
+          const combinedPrompt =
+            `Original email:\n${lastOriginalBody}\n\n` +
+            `Previous draft:\n${lastGptDraft}\n\n` +
+            `Edit instructions:\n${editInstructions}`;
+          fsmReplyBuffer = "";
+          postToSendReplyFixed(combinedPrompt);
+        };
       }, 6000);
     };
   } else {
