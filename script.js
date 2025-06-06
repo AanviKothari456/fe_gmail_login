@@ -2,8 +2,9 @@
 
 const BASE_URL = "https://basic-gmail-login.onrender.com";
 
-let unreadIds = [];     // will hold all unread message IDs
-let currentIndex = 0;   // pointer to the “current” email in unreadIds
+let unreadIds = [];       // will hold all unread message IDs
+let currentIndex = 0;     // pointer to the “current” email in unreadIds
+let currentMsgId = "";    // track the msg_id of whatever email is loaded
 
 // 1) LOGIN and INITIAL FETCH OF ALL UNREAD IDS
 async function login() {
@@ -41,6 +42,9 @@ async function loadInitial() {
 // 2) LOAD A SINGLE EMAIL BY ID (replaces old loadEmail)
 async function loadEmailById(msgId) {
   try {
+    // Remember which msg_id we’re displaying now:
+    currentMsgId = msgId;
+
     // Fetch that one message’s subject/body/summary
     const res = await fetch(`${BASE_URL}/latest_email?msg_id=${msgId}`, {
       credentials: "include"
@@ -58,6 +62,11 @@ async function loadEmailById(msgId) {
 
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
+
+    // Clear out any previous transcript/AI‐textarea
+    document.getElementById("transcript").innerText = "";
+    document.getElementById("transcript").dataset.reply = "";
+    document.getElementById("aiReplyEditable").value = "";
   } catch (err) {
     console.error("Error loading email by ID:", err);
     alert("Something went wrong while fetching the email.");
@@ -83,7 +92,7 @@ function readSummary() {
   speechSynthesis.speak(utter);
 }
 
-// 5) VOICE‐TO‐TEXT FOR USER INSTRUCTION (unchanged from before)
+// 5) VOICE‐TO‐TEXT FOR USER INSTRUCTION (unchanged)
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -114,7 +123,7 @@ function stopRecording() {
   if (recognition) recognition.stop();
 }
 
-// 6) GENERATE AI REPLY (populates the textarea exactly as before)
+// 6) GENERATE AI REPLY (include currentMsgId now)
 async function sendReply() {
   const userInstruction = document.getElementById("transcript").dataset.reply;
   if (!userInstruction) {
@@ -125,7 +134,10 @@ async function sendReply() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ reply: userInstruction })
+    body: JSON.stringify({
+      reply: userInstruction,
+      msg_id: currentMsgId
+    })
   });
 
   if (!res.ok) {
@@ -208,7 +220,10 @@ async function actuallySendEmail() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ reply_text: finalText })
+    body: JSON.stringify({
+      reply_text: finalText,
+      msg_id: currentMsgId
+    })
   });
 
   if (!res.ok) {
@@ -226,22 +241,10 @@ async function actuallySendEmail() {
 }
 
 function goToNextEmail(justSent) {
-  // Optionally mark the current ID as “done” in Gmail by removing UNREAD – but
-  // if your /send_email already replies on that thread, it typically gets
-  // marked read automatically. For a “skip” (justSent=false), you might call:
-  //    service.users().messages().modify(userId="me", id=currentId, body={"removeLabelIds":["UNREAD"]}).execute();
-  // But skipping that here for brevity.
-
   currentIndex += 1;
   if (currentIndex < unreadIds.length) {
-    // Load the next message ID
     loadEmailById(unreadIds[currentIndex]);
-    // Clear the transcript and AI‐textarea
-    document.getElementById("transcript").innerText = "";
-    document.getElementById("transcript").dataset.reply = "";
-    document.getElementById("aiReplyEditable").value = "";
   } else {
-    // No more unread IDs → show “All done”
     showAllDoneMessage();
   }
 }
