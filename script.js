@@ -58,10 +58,11 @@ async function loadEmailById(msgId) {
     bodyEl.className = "collapsed-content";
     bodyEl.innerHTML = data.body_html || "";  
     // if data.body_html is empty, this will simply inject an empty string
+
     document.getElementById("summary").innerText = data.summary || "";
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
-    
+
     document.getElementById("transcript").innerText = "";
     document.getElementById("transcript").dataset.reply = "";
     document.getElementById("aiReplyEditable").value = "";
@@ -256,4 +257,192 @@ function goToNextEmail(justSent) {
 function showAllDoneMessage() {
   document.getElementById("content").style.display = "none";
   document.getElementById("doneMessage").style.display = "block";
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Hands‐Free Workflow: one button orchestrates read-summary → record → AI‐reply → send/skip
+
+function handsFreeFlow() {
+  // Phase 1: Read the two‐line summary aloud, then ask “start recording?”
+  const summaryText = document.getElementById("summary").innerText || "";
+  if (!summaryText) {
+    alert("No summary available.");
+    return;
+  }
+  const utter = new SpeechSynthesisUtterance(summaryText);
+  utter.lang = "en-US";
+  speechSynthesis.speak(utter);
+
+  utter.onend = () => {
+    const confirmUtter = new SpeechSynthesisUtterance(
+      "Do you want to start recording your reply? Say yes or no."
+    );
+    confirmUtter.lang = "en-US";
+    speechSynthesis.speak(confirmUtter);
+    confirmUtter.onend = () => {
+      listenForStartConfirmation();
+    };
+  };
+}
+
+function listenForStartConfirmation() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Speech recognition not supported.");
+    return;
+  }
+  const confirmRecog = new SpeechRecognition();
+  confirmRecog.lang = "en-US";
+  confirmRecog.continuous = false;
+
+  confirmRecog.onresult = (event) => {
+    const answer = event.results[0][0].transcript.toLowerCase();
+    if (answer.includes("yes")) {
+      startReplyRecording();
+    } else if (answer.includes("no")) {
+      // Do nothing, end flow
+    } else {
+      const retryUtter = new SpeechSynthesisUtterance(
+        "Please say yes to start recording, or no to cancel."
+      );
+      retryUtter.lang = "en-US";
+      speechSynthesis.speak(retryUtter);
+      retryUtter.onend = () => {
+        listenForStartConfirmation();
+      };
+    }
+  };
+
+  confirmRecog.onerror = (event) => {
+    console.error("Start confirmation recognition error:", event.error);
+    alert("Could not understand. Please click 'Hands Free' and try again.");
+  };
+
+  confirmRecog.start();
+}
+
+function startReplyRecording() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Speech recognition not supported.");
+    return;
+  }
+
+  const replyRecog = new SpeechRecognition();
+  replyRecog.lang = "en-US";
+  replyRecog.continuous = true;
+
+  let collectedReply = "";
+
+  replyRecog.onresult = (event) => {
+    // Grab the most recent transcript chunk
+    const transcript = event.results[event.results.length - 1][0].transcript;
+    if (transcript.toLowerCase().includes("stop recording")) {
+      replyRecog.stop();
+    } else {
+      collectedReply += transcript + " ";
+    }
+  };
+
+  replyRecog.onerror = (event) => {
+    console.error("Reply recognition error:", event.error);
+    alert("Error during reply recording.");
+  };
+
+  replyRecog.onend = () => {
+    // Phase 3 done: send collectedReply to AI and read out response
+    postToSendReply(collectedReply.trim());
+  };
+
+  // Prompt user that recording is starting
+  const startUtter = new SpeechSynthesisUtterance(
+    "Recording started. Say 'stop recording' when you are done."
+  );
+  startUtter.lang = "en-US";
+  speechSynthesis.speak(startUtter);
+
+  startUtter.onend = () => {
+    replyRecog.start();
+  };
+}
+
+async function postToSendReply(replyText) {
+  if (!replyText) {
+    alert("No reply detected.");
+    return;
+  }
+  try {
+    const res = await fetch(`${BASE_URL}/send_reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        reply: replyText,
+        msg_id: currentMsgId
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      return alert("Error generating AI reply: " + (err.error || JSON.stringify(err)));
+    }
+    const data = await res.json();
+    document.getElementById("aiReplyEditable").value = data.formatted_reply;
+    // Phase 4: read the AI’s reply and ask “yes to send or no to skip”
+    readGeneratedReply();
+  } catch (e) {
+    console.error(e);
+    alert("Failed to generate AI reply.");
+  }
+}
+
+function readGeneratedReply() {
+  const replyText = document.getElementById("aiReplyEditable").value || "";
+  if (!replyText) {
+    alert("No AI reply to read.");
+    return;
+  }
+  const utter = new SpeechSynthesisUtterance(
+    replyText + ". . . Say yes to send or no to skip."
+  );
+  utter.lang = "en-US";
+  speechSynthesis.speak(utter);
+  utter.onend = () => {
+    listenForSendOrSkip();
+  };
+}
+
+function listenForSendOrSkip() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Speech recognition not supported.");
+    return;
+  }
+  const sendRecog = new SpeechRecognition();
+  sendRecog.lang = "en-US";
+  sendRecog.continuous = false;
+
+  sendRecog.onresult = (event) => {
+    const answer = event.results[0][0].transcript.toLowerCase();
+    if (answer.includes("yes")) {
+      actuallySendEmail();
+    } else if (answer.includes("no")) {
+      goToNextEmail(false);
+    } else {
+      const retryUtter = new SpeechSynthesisUtterance(
+        "Please say yes to send or no to skip."
+      );
+      retryUtter.lang = "en-US";
+      speechSynthesis.speak(retryUtter);
+      retryUtter.onend = () => {
+        listenForSendOrSkip();
+      };
+    }
+  };
+
+  sendRecog.onerror = (event) => {
+    console.error("Send/skip recognition error:", event.error);
+    alert("Could not understand. Please try again.");
+  };
+
+  sendRecog.start();
 }
