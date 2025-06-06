@@ -1,21 +1,17 @@
+// File: script.js
 const BASE_URL = "https://basic-gmail-login.onrender.com";
 
 async function login() {
-  // Clicking “Login with Gmail” → backend /login
   window.location.href = `${BASE_URL}/login`;
 }
 
 async function loadEmail() {
   try {
     const res = await fetch(`${BASE_URL}/latest_email`, { credentials: "include" });
-
     if (res.status === 401) {
-      // Not logged in → hide email UI, keep the login button visible
       document.getElementById("content").style.display = "none";
       return;
     }
-
-    // We got a valid email back → hide the login button
     document.getElementById("loginBtn").style.display = "none";
 
     const data = await res.json();
@@ -29,7 +25,6 @@ async function loadEmail() {
   }
 }
 
-// Speech-to-text setup
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -51,10 +46,9 @@ if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
 }
 
 function startRecording() {
-  if (!recognition) return;
-  document.getElementById("transcript").innerText = "";      
+  document.getElementById("transcript").innerText = "";
   document.getElementById("transcript").dataset.reply = "";
-  recognition.start();
+  if (recognition) recognition.start();
 }
 
 function stopRecording() {
@@ -62,24 +56,35 @@ function stopRecording() {
 }
 
 async function sendReply() {
-  const reply = document.getElementById("transcript").dataset.reply;
-  if (!reply) return alert("Please speak a reply first.");
+  // Grab whatever you just spoke:
+  const userInstruction = document.getElementById("transcript").dataset.reply;
+  if (!userInstruction) {
+    return alert("Please speak a reply instruction first.");
+  }
+
+  // Send it to /send_reply to get back the AI‐formatted email text
   const res = await fetch(`${BASE_URL}/send_reply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ reply })
+    body: JSON.stringify({ reply: userInstruction })
   });
+
+  if (!res.ok) {
+    const err = await res.json();
+    return alert("Error: " + (err.error || JSON.stringify(err)));
+  }
+
   const json = await res.json();
-  alert(json.status || "Reply sent!");
+  // Display the AI‐generated reply in a <pre id="aiReply"></pre>
+  document.getElementById("aiReply").innerText = json.formatted_reply;
 }
 
+// On page load, hide or show appropriately
 window.onload = () => {
   const urlParams = new URLSearchParams(window.location.search);
   const isLoggedIn = urlParams.get("logged_in") === "true";
-
   if (isLoggedIn) {
-    // Hide login button and immediately fetch email
     document.getElementById("loginBtn").style.display = "none";
     loadEmail();
   }
