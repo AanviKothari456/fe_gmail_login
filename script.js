@@ -141,6 +141,58 @@ function stopRecording() {
   if (recognition) recognition.stop();
 }
 
+// 6) Accumulate final transcripts during fixed recording
+function handleRecordReplyFixed(event) {
+  const transcript = event.results[event.resultIndex][0].transcript.trim();
+  if (transcript) {
+    fsmReplyBuffer += transcript + " ";
+  }
+}
+
+// 7) Send user’s spoken reply to AI, then ask to read it back
+async function postToSendReplyFixed(replyText) {
+  if (!replyText) {
+    alert("No reply detected.");
+    fsmPhase = "idle";
+    return;
+  }
+  try {
+    const res = await fetch(`${BASE_URL}/send_reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        reply: replyText,
+        msg_id: currentMsgId
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert("Error generating AI reply: " + (err.error || JSON.stringify(err)));
+      fsmPhase = "idle";
+      return;
+    }
+    const data = await res.json();
+    document.getElementById("aiReplyEditable").value = data.formatted_reply;
+
+    const askReadUtter = new SpeechSynthesisUtterance(
+      "Would you like me to read your reply? Say yes or no."
+    );
+    askReadUtter.lang = "en-US";
+    speechSynthesis.speak(askReadUtter);
+    askReadUtter.onend = () => {
+      fsmPhase = "confirmReadReply";
+      fsmRecog.interimResults = false;
+      fsmRecog.continuous = false;
+      fsmRecog.start();
+    };
+  } catch (e) {
+    console.error(e);
+    alert("Failed to generate AI reply.");
+    fsmPhase = "idle";
+  }
+}
+
 // 6) GENERATE AI REPLY (include currentMsgId)
 async function sendReply() {
   const userInstruction = document.getElementById("transcript").dataset.reply || "";
