@@ -341,7 +341,7 @@ function ensureFsmRecog() {
 
 // 3) Handle “askReplaySummary” answers
 function handleAskReplaySummary(answer) {
-  fsmRecog.stop();
+  //fsmRecog.stop();
 
   if (answer.includes("yes")) {
     const summaryText = document.getElementById("summary").innerText || "";
