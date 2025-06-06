@@ -2,22 +2,20 @@
 
 const BASE_URL = "https://basic-gmail-login.onrender.com";
 
-let unreadIds = [];       // will hold all unread message IDs
-let currentIndex = 0;     // pointer to the “current” email in unreadIds
-let currentMsgId = "";    // track the msg_id of whatever email is loaded
+let unreadIds = [];       // array of unread message IDs
+let currentIndex = 0;     // index of the “current” email in unreadIds
+let currentMsgId = "";    // the msg_id of the email currently displayed
 
 // 1) LOGIN and INITIAL FETCH OF ALL UNREAD IDS
 async function login() {
   window.location.href = `${BASE_URL}/login`;
 }
 
-// After login, fetch unread IDs and then load the first email
+// After login, fetch unread IDs and then load the first email (if any)
 async function loadInitial() {
   try {
-    // Fetch array of unread message IDs
     const res = await fetch(`${BASE_URL}/unread_ids`, { credentials: "include" });
     if (!res.ok) {
-      // Not logged in or error
       document.getElementById("content").style.display = "none";
       return;
     }
@@ -25,12 +23,11 @@ async function loadInitial() {
     unreadIds = data.ids || [];
 
     if (unreadIds.length === 0) {
-      // Nothing to process
+      // No unread emails at all → show “All done”
       showAllDoneMessage();
       return;
     }
 
-    // Otherwise load the first email in the list
     currentIndex = 0;
     await loadEmailById(unreadIds[currentIndex]);
   } catch (err) {
@@ -39,13 +36,11 @@ async function loadInitial() {
   }
 }
 
-// 2) LOAD A SINGLE EMAIL BY ID (replaces old loadEmail)
+// 2) LOAD A SINGLE EMAIL BY ID (whether or not it actually has any content)
 async function loadEmailById(msgId) {
   try {
-    // Remember which msg_id we’re displaying now:
-    currentMsgId = msgId;
+    currentMsgId = msgId; // remember the msg_id
 
-    // Fetch that one message’s subject/body/summary
     const res = await fetch(`${BASE_URL}/latest_email?msg_id=${msgId}`, {
       credentials: "include"
     });
@@ -55,15 +50,15 @@ async function loadEmailById(msgId) {
     }
     const data = await res.json();
 
-    // Populate the UI
-    document.getElementById("subject").innerText = data.subject || "(No subject)";
-    document.getElementById("body").innerText = data.body || "(No body)";
-    document.getElementById("summary").innerText = data.summary || "(No summary)";
+    // Populate subject/body/summary; if any of those are empty, that's fine
+    document.getElementById("subject").innerText = data.subject || "";
+    document.getElementById("body").innerText = data.body || "";
+    document.getElementById("summary").innerText = data.summary || "";
 
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
 
-    // Clear out any previous transcript/AI‐textarea
+    // Clear any leftover transcript or AI textarea
     document.getElementById("transcript").innerText = "";
     document.getElementById("transcript").dataset.reply = "";
     document.getElementById("aiReplyEditable").value = "";
@@ -73,7 +68,6 @@ async function loadEmailById(msgId) {
   }
 }
 
-// 3) ON PAGE LOAD: decide if we should start multi‐email flow
 window.onload = () => {
   const urlParams = new URLSearchParams(window.location.search);
   const isLoggedIn = urlParams.get("logged_in") === "true";
@@ -83,16 +77,17 @@ window.onload = () => {
   }
 };
 
-// 4) SPEECH SYNTHESIS FOR SUMMARY
+// 3) SPEECH SYNTHESIS FOR SUMMARY
 function readSummary() {
   const text = document.getElementById("summary").innerText;
-  if (!text || text === "(No summary)") return;
+  // Even if text is empty, we still allow “Read Summary” to be clicked; it will simply do nothing
+  if (!text) return;
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "en-US";
   speechSynthesis.speak(utter);
 }
 
-// 5) VOICE‐TO‐TEXT FOR USER INSTRUCTION (unchanged)
+// 4) VOICE‐TO‐TEXT FOR USER INSTRUCTION (unchanged)
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -123,13 +118,10 @@ function stopRecording() {
   if (recognition) recognition.stop();
 }
 
-// 6) GENERATE AI REPLY (include currentMsgId now)
+// 5) GENERATE AI REPLY (include currentMsgId)
 async function sendReply() {
-  const userInstruction = document.getElementById("transcript").dataset.reply;
-  if (!userInstruction) {
-    return alert("Please speak a reply instruction first.");
-  }
-
+  const userInstruction = document.getElementById("transcript").dataset.reply || "";
+  // Even if userInstruction is empty, we still send the request so AI can reply to a blank body
   const res = await fetch(`${BASE_URL}/send_reply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -149,21 +141,16 @@ async function sendReply() {
   document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// 7) READ OUT and ASK FOR “YES” vs “NEXT”
+// 6) READ OUT and ASK FOR “YES” vs “NEXT”
 function readAndConfirmReply() {
-  const textToRead = document.getElementById("aiReplyEditable").value.trim();
-  if (!textToRead) {
-    return alert("No reply text to read.");
-  }
-
-  // Speak the AI reply + prompt for “yes” or “next”
+  const textToRead = document.getElementById("aiReplyEditable").value || "";
+  // Even if textToRead is empty, we still prompt for “yes” or “next”
   const utterance = new SpeechSynthesisUtterance(
     textToRead + ". . . Say 'yes' to send, or 'next' to skip."
   );
   utterance.lang = "en-US";
   speechSynthesis.speak(utterance);
 
-  // When done speaking, listen for one keyword
   utterance.onend = () => {
     listenForConfirmation();
   };
@@ -183,13 +170,10 @@ function listenForConfirmation() {
   ConfirmRecog.onresult = (event) => {
     const answer = event.results[0][0].transcript.toLowerCase().trim();
     if (answer.includes("yes")) {
-      // Send this email, then move on
       actuallySendEmail();
     } else if (answer.includes("next")) {
-      // Skip sending and go to the next email
       goToNextEmail(false);
     } else {
-      // If neither “yes” nor “next,” ask again
       const retryUtter = new SpeechSynthesisUtterance(
         "Please say 'yes' to send or 'next' to skip."
       );
@@ -209,13 +193,9 @@ function listenForConfirmation() {
   ConfirmRecog.start();
 }
 
-// 8) SEND VIA GMAIL or SKIP, THEN ADVANCE INDEX
+// 7) SEND VIA GMAIL or SKIP, THEN ADVANCE INDEX
 async function actuallySendEmail() {
-  const finalText = document.getElementById("aiReplyEditable").value.trim();
-  if (!finalText) {
-    return alert("Reply text is empty—nothing to send.");
-  }
-
+  const finalText = document.getElementById("aiReplyEditable").value || "";
   const res = await fetch(`${BASE_URL}/send_email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -234,7 +214,7 @@ async function actuallySendEmail() {
   const json = await res.json();
   if (json.status === "sent") {
     alert("Email sent successfully!");
-    goToNextEmail(true);
+    goToNextEmail(true);  // <— immediately advance to the next email
   } else {
     alert("Unexpected response: " + JSON.stringify(json));
   }
@@ -249,7 +229,7 @@ function goToNextEmail(justSent) {
   }
 }
 
-// 9) SHOW “ALL DONE” and HIDE EVERYTHING ELSE
+// 8) SHOW “ALL DONE” and HIDE EVERYTHING ELSE
 function showAllDoneMessage() {
   document.getElementById("content").style.display = "none";
   document.getElementById("doneMessage").style.display = "block";
