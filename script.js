@@ -1,55 +1,10 @@
-// File: script.js
-
 const BASE_URL = "https://basic-gmail-login.onrender.com";
-const USE_ELEVEN = true;
 
-// -- TTS Helpers --------------------------------------------------------------
-async function elevenSpeak(text) {
-  const res = await fetch(`${BASE_URL}/tts`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
-  });
-  if (!res.ok) throw new Error("ElevenLabs TTS error");
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  return new Promise((resolve, reject) => {
-    const audio = new Audio(url);
-    audio.onended = resolve;
-    audio.onerror = reject;
-    audio.play();
-  });
-}
+let unreadIds = [];       // will hold all unread message IDs
+let currentIndex = 0;     // pointer to the “current” email in unreadIds
+let currentMsgId = "";    // track which msg_id is currently shown
 
-function nativeSpeak(text) {
-  return new Promise(resolve => {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.onend = resolve;
-    speechSynthesis.speak(u);
-  });
-}
-
-async function speak(text) {
-  if (USE_ELEVEN) {
-    try {
-      await elevenSpeak(text);
-      return;
-    } catch (e) {
-      console.warn("ElevenLabs TTS failed, falling back to native TTS", e);
-    }
-  }
-  await nativeSpeak(text);
-}
-
-// -- Application State -------------------------------------------------------
-let unreadIds = [];
-let currentIndex = 0;
-let currentMsgId = "";
-let lastOriginalBody = "";
-
-// -- Login & Initial Fetch --------------------------------------------------
+// 1) LOGIN and INITIAL FETCH OF ALL UNREAD IDS
 async function login() {
   window.location.href = `${BASE_URL}/login`;
 }
@@ -63,7 +18,12 @@ async function loadInitial() {
     }
     const data = await res.json();
     unreadIds = data.ids || [];
-    if (!unreadIds.length) return showAllDoneMessage();
+
+    if (unreadIds.length === 0) {
+      showAllDoneMessage();
+      return;
+    }
+
     currentIndex = 0;
     await loadEmailById(unreadIds[currentIndex]);
   } catch (err) {
@@ -72,26 +32,34 @@ async function loadInitial() {
   }
 }
 
+// 2) LOAD A SINGLE EMAIL BY ID (now uses body_html)
 async function loadEmailById(msgId) {
   try {
     currentMsgId = msgId;
-    const res = await fetch(`${BASE_URL}/latest_email?msg_id=${msgId}`, { credentials: "include" });
+
+    const res = await fetch(`${BASE_URL}/latest_email?msg_id=${msgId}`, {
+      credentials: "include"
+    });
     if (res.status === 401) {
       document.getElementById("content").style.display = "none";
       return;
     }
     const data = await res.json();
+
     document.getElementById("subject").innerText = data.subject || "";
+
+    // Toggling: reset to “collapsed” on each new email
     const toggleEl = document.getElementById("body-toggle");
     const bodyEl = document.getElementById("body-content");
     toggleEl.className = "collapsed";
     toggleEl.innerText = "▶ Body";
     bodyEl.className = "collapsed-content";
-    bodyEl.innerHTML = data.body_html || "";
+    bodyEl.innerHTML = data.body_html || "";  
+    // if data.body_html is empty, this will simply inject an empty string
     document.getElementById("summary").innerText = data.summary || "";
     document.getElementById("content").style.display = "block";
     document.getElementById("doneMessage").style.display = "none";
-    lastOriginalBody = data.body_text || stripHtml(data.body_html || "");
+    
     document.getElementById("transcript").innerText = "";
     document.getElementById("transcript").dataset.reply = "";
     document.getElementById("aiReplyEditable").value = "";
@@ -101,174 +69,189 @@ async function loadEmailById(msgId) {
   }
 }
 
-function stripHtml(html) {
-  const tmp = document.createElement("DIV");
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || "";
-}
-
 window.onload = () => {
-  const isLoggedIn = new URLSearchParams(window.location.search).get("logged_in") === "true";
+  const urlParams = new URLSearchParams(window.location.search);
+  const isLoggedIn = urlParams.get("logged_in") === "true";
   if (isLoggedIn) {
     document.getElementById("loginBtn").style.display = "none";
     loadInitial();
   }
 };
 
-document.addEventListener("click", e => {
+// 3) TOGGLE BODY EXPANSION/COLLAPSE
+document.addEventListener("click", (e) => {
+  // If the click was on the toggle header, swap classes and arrow
   if (e.target.id === "body-toggle") {
     const toggleEl = e.target;
     const bodyEl = document.getElementById("body-content");
+
     if (toggleEl.classList.contains("collapsed")) {
-      toggleEl.classList.replace("collapsed", "expanded");
+      toggleEl.classList.remove("collapsed");
+      toggleEl.classList.add("expanded");
       toggleEl.innerText = "▼ Body";
-      bodyEl.classList.replace("collapsed-content", "expanded-content");
+      bodyEl.classList.remove("collapsed-content");
+      bodyEl.classList.add("expanded-content");
     } else {
-      toggleEl.classList.replace("expanded", "collapsed");
+      toggleEl.classList.remove("expanded");
+      toggleEl.classList.add("collapsed");
       toggleEl.innerText = "▶ Body";
-      bodyEl.classList.replace("expanded-content", "collapsed-content");
+      bodyEl.classList.remove("expanded-content");
+      bodyEl.classList.add("collapsed-content");
     }
   }
 });
 
-// -- Read Summary ------------------------------------------------------------
-async function readSummary() {
+// 4) SPEECH SYNTHESIS FOR SUMMARY
+function readSummary() {
   const text = document.getElementById("summary").innerText || "";
   if (!text) return;
-  await speak(text);
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "en-US";
+  speechSynthesis.speak(utter);
 }
 
-// -- Voice-to-Text Setup -----------------------------------------------------
+// 5) VOICE‐TO‐TEXT FOR USER INSTRUCTION (unchanged)
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
   recognition.lang = "en-US";
   recognition.continuous = false;
-  recognition.onresult = e => {
-    const t = e.results[0][0].transcript;
-    document.getElementById("transcript").innerText = "You said: " + t;
-    fsmReplyBuffer += t + " ";
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    document.getElementById("transcript").innerText = "You said: " + transcript;
+    document.getElementById("transcript").dataset.reply = transcript;
   };
-  recognition.onerror = e => console.error("Mic error: " + e.error);
+
+  recognition.onerror = (event) => {
+    alert("Mic error: " + event.error);
+  };
 } else {
-  console.warn("SpeechRecognition not supported");
+  alert("Your browser does not support voice input (try Chrome).");
 }
+
 function startRecording() {
   document.getElementById("transcript").innerText = "";
-  fsmReplyBuffer = "";
-  recognition && recognition.start();
+  document.getElementById("transcript").dataset.reply = "";
+  if (recognition) recognition.start();
 }
+
 function stopRecording() {
-  recognition && recognition.stop();
+  if (recognition) recognition.stop();
 }
 
-// -- FSM & AI Interactions --------------------------------------------------
-let fsmRecog = null;
-let fsmPhase = "idle";
-let lastGptDraft = "";
+// 6) GENERATE AI REPLY (include currentMsgId)
+async function sendReply() {
+  const userInstruction = document.getElementById("transcript").dataset.reply || "";
+  const res = await fetch(`${BASE_URL}/send_reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      reply: userInstruction,
+      msg_id: currentMsgId
+    })
+  });
 
-async function postToSendReplyFixed(replyText) {
-  // proceed directly to sending
-  try {
-    const res = await fetch(`${BASE_URL}/send_reply`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reply: replyText, msg_id: currentMsgId })
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      alert("Error generating AI reply: " + (err.error || JSON.stringify(err)));
-      fsmPhase = "idle";
-      return;
-    }
-    const { formatted_reply } = await res.json();
-    document.getElementById("aiReplyEditable").value = formatted_reply;
-    lastGptDraft = formatted_reply;
-
-    await speak("Would you like me to read your reply? Say yes or no.");
-    fsmPhase = "confirmReadReply";
-    ensureFsmRecog();
-    fsmRecog.start();
-  } catch (e) {
-    console.error(e);
-    alert("Failed to generate AI reply.");
-    fsmPhase = "idle";
+  if (!res.ok) {
+    const err = await res.json();
+    return alert("Error: " + (err.error || JSON.stringify(err)));
   }
+
+  const json = await res.json();
+  document.getElementById("aiReplyEditable").value = json.formatted_reply;
 }
 
-// -- Handle AskRecordReply --------------------------------------------------
-function handleAskRecordReply(answer) {
-  fsmRecog.stop();
-  if (answer.includes("yes")) {
-    speak("Recording started. You have six seconds.")
-      .then(() => {
-        fsmPhase = "recordReplyFixed";
-        fsmReplyBuffer = "";
-        recognition.continuous = true;
-        recognition.start();
-        setTimeout(() => {
-          recognition.stop();
-          speak("Ending recording.")
-            .then(async () => {
-              const trimmed = fsmReplyBuffer.trim();
-              if (!trimmed) {
-                await speak("I didn't catch that. Would you like to try recording again? Say yes or no.");
-                fsmPhase = "askRecordReply";
-                ensureFsmRecog();
-                fsmRecog.start();
-              } else {
-                postToSendReplyFixed(trimmed);
-              }
-            });
-        }, 6000);
-      });
-  } else if (answer.includes("no")) {
-    fsmPhase = "idle";
+// 7) READ OUT and ASK FOR “YES” vs “NEXT”
+function readAndConfirmReply() {
+  const textToRead = document.getElementById("aiReplyEditable").value || "";
+  const utterance = new SpeechSynthesisUtterance(
+    textToRead + ". . . Say 'yes' to send, or 'next' to skip."
+  );
+  utterance.lang = "en-US";
+  speechSynthesis.speak(utterance);
+
+  utterance.onend = () => {
+    listenForConfirmation();
+  };
+}
+
+function listenForConfirmation() {
+  if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
+    return alert("Your browser does not support speech recognition.");
+  }
+
+  const ConfirmRecog = window.SpeechRecognition
+    ? new SpeechRecognition()
+    : new webkitSpeechRecognition();
+  ConfirmRecog.lang = "en-US";
+  ConfirmRecog.continuous = false;
+
+  ConfirmRecog.onresult = (event) => {
+    const answer = event.results[0][0].transcript.toLowerCase().trim();
+    if (answer.includes("yes")) {
+      actuallySendEmail();
+    } else if (answer.includes("next")) {
+      goToNextEmail(false);
+    } else {
+      const retryUtter = new SpeechSynthesisUtterance(
+        "Please say 'yes' to send or 'next' to skip."
+      );
+      retryUtter.lang = "en-US";
+      speechSynthesis.speak(retryUtter);
+      retryUtter.onend = () => {
+        listenForConfirmation();
+      };
+    }
+  };
+
+  ConfirmRecog.onerror = (event) => {
+    console.error("Confirmation recognition error:", event.error);
+    alert("Could not understand. Please click the button and say 'yes' or 'next'.");
+  };
+
+  ConfirmRecog.start();
+}
+
+// 8) SEND VIA GMAIL or SKIP, THEN ADVANCE INDEX
+async function actuallySendEmail() {
+  const finalText = document.getElementById("aiReplyEditable").value || "";
+  const res = await fetch(`${BASE_URL}/send_email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      reply_text: finalText,
+      msg_id: currentMsgId
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    return alert("Failed to send email: " + (err.error || JSON.stringify(err)));
+  }
+
+  const json = await res.json();
+  if (json.status === "sent") {
+    alert("Email sent successfully!");
+    goToNextEmail(true);
   } else {
-    speak("Please say yes to record your reply, or no to skip.")
-      .then(() => fsmRecog.start());
+    alert("Unexpected response: " + JSON.stringify(json));
   }
 }
 
-// The rest of FSM handlers (confirmReadReply, confirmSendFinal, etc.) unchanged...
-
-// -- Hands-Free Entry --------------------------------------------------------
-function handsFreeFlow() {
-  if (fsmPhase !== "idle") return;
-  fsmPhase = "askReplaySummary";
-  ensureFsmRecog();
-  speak("Would you like to listen to the summary? Say yes or no.")
-    .then(() => fsmRecog.start());
+function goToNextEmail(justSent) {
+  currentIndex += 1;
+  if (currentIndex < unreadIds.length) {
+    loadEmailById(unreadIds[currentIndex]);
+  } else {
+    showAllDoneMessage();
+  }
 }
 
-// -- FSM Recognizer Setup ----------------------------------------------------
-function ensureFsmRecog() {
-  if (fsmRecog) return;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    console.warn("SpeechRecognition not supported");
-    fsmPhase = "idle";
-    return;
-  }
-  fsmRecog = new SR();
-  fsmRecog.lang = "en-US";
-  fsmRecog.continuous = false;
-  fsmRecog.interimResults = false;
-  fsmRecog.onresult = (event) => {
-    const transcript = event.results[0][0].transcript.trim().toLowerCase();
-    switch (fsmPhase) {
-      case "askRecordReply":
-        handleAskRecordReply(transcript);
-        break;
-      // add other cases if needed
-      default:
-        break;
-    }
-  };
-  fsmRecog.onerror = (e) => {
-    console.error("FSM error", e);
-    fsmPhase = "idle";
-  };
+// 9) SHOW “ALL DONE” and HIDE EVERYTHING ELSE
+function showAllDoneMessage() {
+  document.getElementById("content").style.display = "none";
+  document.getElementById("doneMessage").style.display = "block";
 }
