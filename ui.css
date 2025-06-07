@@ -184,3 +184,9 @@ h1 {
   margin: var(--spacing) auto;
 }
 
+/* Center only the Gmail‐login button under the header */
+#loginBtn {
+  display: block;
+  margin: 1rem auto;
+}
+
