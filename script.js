@@ -380,12 +380,11 @@ async function handleAskEditOrSend(ans) {
   }
 }
 
-// 5) Capture edit instructions and call backend to revise
+// ── 5) Capture edit instructions and call backend to revise ────────────────
 async function handleAskRecordEdit(ans) {
   fsmRecog.stop();
-  // `ans` is the edit instruction
-  const editInstructions = ans;
-  // call your new edit endpoint
+  const editInstructions = ans.trim();
+  // call your edit endpoint
   const res = await fetch(`${BASE_URL}/edit_reply`, {
     method: "POST", credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -399,18 +398,42 @@ async function handleAskRecordEdit(ans) {
   lastGptDraft = revised_reply;
   document.getElementById("aiReplyEditable").value = revised_reply;
 
-  await speak("Revised draft ready. Say send to send it or skip to move on.");
+  // **NEW** prompt: read / send / skip
+  await speak(
+    "Revised draft ready. " +
+    "Say read to hear it, send to send it, or skip to move to the next email."
+  );
   fsmPhase = "confirmSendFinal";
   fsmRecog.start();
 }
 
-// 6) Final send / skip after edit
+// ── 6) Final send / skip / read after edit ─────────────────────────────────
 async function handleConfirmSendFinal(ans) {
   fsmRecog.stop();
-  if (ans.includes("send")) {
+  const normalized = ans.trim().toLowerCase();
+
+  if (normalized.includes("read")) {
+    // read it back
+    await speak(lastGptDraft);
+    await speak("Say send to send it, or skip to move on.");
+    fsmPhase = "confirmSendFinal";
+    fsmRecog.start();
+
+  } else if (normalized.includes("send")) {
+    // send email
     await actuallySendEmail();
-  } else {
+    fsmPhase = "idle";
+
+  } else if (normalized.includes("skip") || normalized.includes("next")) {
+    // skip to next
+    await speak("Moving to the next email.");
     goToNextEmail();
+    fsmPhase = "idle";
+
+  } else {
+    // unrecognized → re-prompt
+    await speak("Please say read, send, or skip.");
+    fsmRecog.start();
   }
-  fsmPhase = "idle";
 }
+
