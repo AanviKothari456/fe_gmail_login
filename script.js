@@ -237,45 +237,47 @@ let fsmPhase = "idle";
 
 
 
-// ── HANDS-FREE FSM ────────────────────────────────────────────────────────────
 
 async function handsFreeFlow() {
   if (fsmPhase !== "idle") return;
   fsmPhase = "askReplaySummary";
-  // ask for yes or skip (instead of yes/no)
-  await speak("Would you like to hear the summary? Say yes to listen, or skip to move to the next email.");
+  await speak(
+    "Would you like to hear the summary? " +
+    "Say yes to listen, or say skip or next to move to the next email."
+  );
   fsmRecog = null;
   ensureFsmRecog();
   fsmRecog.start();
 }
 
-
-
-
 async function handleAskReplaySummary(ans) {
   fsmRecog.stop();
+  const normalized = ans.trim().toLowerCase();
 
-  if (ans.includes("yes")) {
-    // user wants to hear it
+  if (normalized.includes("yes")) {
+    // read it, then go on to the reply prompt
     const summary = document.getElementById("summary").innerText;
     await speak(summary);
-
-    // then move to the reply question
-    await speak("Ready to record your reply? Say yes or skip.");
+    await speak("Ready to record your reply? Say yes to start or skip/next to move on.");
     fsmPhase = "askRecordReply";
     fsmRecog.start();
 
-  } else if (ans.includes("skip")) {
-    // user wants to skip directly to next email
+  } else if (normalized.includes("skip") || normalized.includes("next")) {
+    // jump straight to the next email
+    await speak("Skipping to the next email.");
     goToNextEmail();
     fsmPhase = "idle";
 
   } else {
-    // unrecognized answer → re-prompt
-    await speak("Sorry, I didn’t catch that. Please say yes to hear the summary, or skip to move on.");
+    // didn’t catch it — re-ask
+    await speak(
+      "Sorry, I didn’t catch that. " +
+      "Please say yes to hear the summary, or skip/next to move on."
+    );
     fsmRecog.start();
   }
 }
+
 
 function ensureFsmRecog() {
   if (fsmRecog) return;
