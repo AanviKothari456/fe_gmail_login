@@ -190,3 +190,12 @@ h1 {
   margin: 1rem auto;
 }
 
+.loading-screen {
+  text-align: center;
+  margin: 3rem auto;
+  font-size: 1.1rem;
+  color: #4b5563; /* gray-700 */
+}
+.loading-screen p {
+  margin: 0.5rem 0;
+}
