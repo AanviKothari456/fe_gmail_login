@@ -247,6 +247,24 @@ async function actuallySendEmail() {
   }
 }
 
+// 9) ATTACHMENTS SUMMARY
+document.getElementById("extractBtn").addEventListener("click", async () => {
+  if (!currentMsgId) return;
+  const p = document.getElementById("attachmentSummary");
+  p.innerText = "Extracting attachments…";
+  try {
+    const res = await fetch(
+      `${BASE_URL}/attachments_summary?msg_id=${currentMsgId}`,
+      { credentials: "include" }
+    );
+    if (!res.ok) throw new Error("Failed to fetch attachment summary");
+    const { attachment_summary } = await res.json();
+    p.innerText = attachment_summary;
+  } catch (e) {
+    p.innerText = "Error: " + e.message;
+  }
+});
+
 function goToNextEmail() {
   currentIndex++;
   if (currentIndex < unreadIds.length) loadEmailById(unreadIds[currentIndex]);
