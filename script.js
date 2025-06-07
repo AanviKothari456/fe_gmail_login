@@ -235,13 +235,46 @@ function showAllDoneMessage() {
 let fsmRecog = null;
 let fsmPhase = "idle";
 
+
+
+// ── HANDS-FREE FSM ────────────────────────────────────────────────────────────
+
 async function handsFreeFlow() {
   if (fsmPhase !== "idle") return;
   fsmPhase = "askReplaySummary";
-  await speak("Would you like to hear the summary? Say yes or no.");
+  // ask for yes or skip (instead of yes/no)
+  await speak("Would you like to hear the summary? Say yes to listen, or skip to move to the next email.");
   fsmRecog = null;
   ensureFsmRecog();
   fsmRecog.start();
+}
+
+
+
+
+async function handleAskReplaySummary(ans) {
+  fsmRecog.stop();
+
+  if (ans.includes("yes")) {
+    // user wants to hear it
+    const summary = document.getElementById("summary").innerText;
+    await speak(summary);
+
+    // then move to the reply question
+    await speak("Ready to record your reply? Say yes or skip.");
+    fsmPhase = "askRecordReply";
+    fsmRecog.start();
+
+  } else if (ans.includes("skip")) {
+    // user wants to skip directly to next email
+    goToNextEmail();
+    fsmPhase = "idle";
+
+  } else {
+    // unrecognized answer → re-prompt
+    await speak("Sorry, I didn’t catch that. Please say yes to hear the summary, or skip to move on.");
+    fsmRecog.start();
+  }
 }
 
 function ensureFsmRecog() {
