@@ -1,10 +1,10 @@
 // File: script.js
 
 const BASE_URL = "https://basic-gmail-login.onrender.com";
-const USE_ELEVEN = true;
-const USE_ASSEMBLY = true; // toggle AssemblyAI for Hands-Free STT
+const USE_ELEVEN = true;      // toggle ElevenLabs TTS
+const USE_ASSEMBLY = true;    // toggle AssemblyAI STT in Hands-Free
 
-// -- TTS Helpers --------------------------------------------------------------
+// ── TTS Helpers ───────────────────────────────────────────────────────────────
 async function elevenSpeak(text) {
   const res = await fetch(`${BASE_URL}/tts`, {
     method: "POST",
@@ -38,14 +38,15 @@ async function speak(text) {
       await elevenSpeak(text);
       return;
     } catch (e) {
-      console.warn("ElevenLabs TTS failed, falling back to native TTS", e);
+      console.warn("ElevenLabs failed, falling back:", e);
     }
   }
   await nativeSpeak(text);
 }
 
-// -- AssemblyAI STT Helper ---------------------------------------------------
+// ── AssemblyAI STT Helper (via backend) ────────────────────────────────────────
 async function assemblyTranscribe(durationMs = 6000) {
+  // 1) record from mic
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const recorder = new MediaRecorder(stream);
   const chunks = [];
@@ -53,68 +54,67 @@ async function assemblyTranscribe(durationMs = 6000) {
   recorder.start();
   await new Promise(r => setTimeout(r, durationMs));
   recorder.stop();
-  await new Promise(r => recorder.onstop = r);
+  await new Promise(r => (recorder.onstop = r));
   stream.getTracks().forEach(t => t.stop());
-  const blob = new Blob(chunks, { type: 'audio/webm' });
+  const blob = new Blob(chunks, { type: "audio/webm" });
 
-  // proxy to backend for secure key handling
+  // 2) send to backend /transcribe
   const form = new FormData();
-  form.append('audio', blob, 'reply.webm');
+  form.append("audio", blob, "reply.webm");
   const res = await fetch(`${BASE_URL}/transcribe`, {
-    method: 'POST',
-    credentials: 'include',
+    method: "POST",
+    credentials: "include",
     body: form
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Transcription failed');
+    throw new Error(err.error || "Transcription failed");
   }
   const { text } = await res.json();
   return text;
 }
 
-// -- Application State -------------------------------------------------------
+// ── App State ─────────────────────────────────────────────────────────────────
 let unreadIds = [];
 let currentIndex = 0;
 let currentMsgId = "";
+let lastGptDraft = "";
 
-// 1) LOGIN and INITIAL FETCH OF ALL UNREAD IDS
+// ── 1) LOGIN & FETCH UNREAD IDS ────────────────────────────────────────────────
 async function login() {
   window.location.href = `${BASE_URL}/login`;
 }
 
 async function loadInitial() {
-  try {
-    const res = await fetch(`${BASE_URL}/unread_ids`, { credentials: "include" });
-    if (!res.ok) return document.getElementById("content").style.display = "none";
-    const data = await res.json();
-    unreadIds = data.ids || [];
-    if (!unreadIds.length) return showAllDoneMessage();
-    currentIndex = 0;
-    await loadEmailById(unreadIds[currentIndex]);
-  } catch (e) {
-    console.error(e);
-    alert("Could not fetch unread emails.");
+  const res = await fetch(`${BASE_URL}/unread_ids`, { credentials: "include" });
+  if (!res.ok) {
+    document.getElementById("content").style.display = "none";
+    return;
   }
+  const data = await res.json();
+  unreadIds = data.ids || [];
+  if (!unreadIds.length) return showAllDoneMessage();
+  currentIndex = 0;
+  await loadEmailById(unreadIds[0]);
 }
 
-// 2) LOAD A SINGLE EMAIL BY ID (now uses body_html)
+// ── 2) LOAD EMAIL BY ID ────────────────────────────────────────────────────────
 async function loadEmailById(msgId) {
   currentMsgId = msgId;
   const res = await fetch(`${BASE_URL}/latest_email?msg_id=${msgId}`, { credentials: "include" });
-  if (res.status === 401) return document.getElementById("content").style.display = "none";
+  if (res.status === 401) {
+    document.getElementById("content").style.display = "none";
+    return;
+  }
   const data = await res.json();
   document.getElementById("subject").innerText = data.subject || "";
-  const toggleEl = document.getElementById("body-toggle");
-  const bodyEl = document.getElementById("body-content");
-  toggleEl.className = "collapsed";
-  toggleEl.innerText = "▶ Body";
-  bodyEl.className = "collapsed-content";
-  bodyEl.innerHTML = data.body_html || "";
+  document.getElementById("body-toggle").className = "collapsed";
+  document.getElementById("body-toggle").innerText = "▶ Body";
+  document.getElementById("body-content").className = "collapsed-content";
+  document.getElementById("body-content").innerHTML = data.body_html || "";
   document.getElementById("summary").innerText = data.summary || "";
-  document.getElementById("transcript").innerText = "";
-  document.getElementById("transcript").dataset.reply = "";
   document.getElementById("aiReplyEditable").value = "";
+  document.getElementById("transcript").innerText = "";
   document.getElementById("content").style.display = "block";
   document.getElementById("doneMessage").style.display = "none";
 }
@@ -126,11 +126,10 @@ window.onload = () => {
   }
 };
 
-// 3) TOGGLE BODY EXPANSION/COLLAPSE
+// ── 3) TOGGLE BODY ─────────────────────────────────────────────────────────────
 document.addEventListener("click", e => {
   if (e.target.id === "body-toggle") {
-    const t = e.target;
-    const b = document.getElementById("body-content");
+    const t = e.target, b = document.getElementById("body-content");
     if (t.classList.contains("collapsed")) {
       t.classList.replace("collapsed", "expanded");
       t.innerText = "▼ Body";
@@ -143,13 +142,13 @@ document.addEventListener("click", e => {
   }
 });
 
-// 4) SPEECH SYNTHESIS FOR SUMMARY
-function readSummary() {
+// ── 4) MANUAL SUMMARY READER ────────────────────────────────────────────────────
+async function readSummary() {
   const text = document.getElementById("summary").innerText;
-  if (text) speak(text);
+  if (text) await speak(text);
 }
 
-// 5) VOICE‐TO‐TEXT FOR USER INSTRUCTION (unchanged)
+// ── 5) MANUAL VOICE-TO-TEXT (unchanged) ────────────────────────────────────────
 let recognition;
 if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -165,48 +164,47 @@ if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
 } else {
   console.warn("Voice input unsupported");
 }
-function startRecording() { document.getElementById("transcript").innerText = ""; recognition && recognition.start(); }
+function startRecording() { recognition && recognition.start(); }
 function stopRecording() { recognition && recognition.stop(); }
 
-// 6) GENERATE AI REPLY (manual)
+// ── 6) MANUAL AI REPLY ─────────────────────────────────────────────────────────
 async function sendReply() {
-  const userInstruction = document.getElementById("transcript").dataset.reply || "";
-  if (!userInstruction) return alert("No reply detected.");
+  const reply = document.getElementById("transcript").dataset.reply || "";
+  if (!reply) return alert("No reply detected.");
   const res = await fetch(`${BASE_URL}/send_reply`, {
-    method: "POST",
-    credentials: "include",
+    method: "POST", credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reply: userInstruction, msg_id: currentMsgId })
+    body: JSON.stringify({ reply, msg_id: currentMsgId })
   });
-  if (!res.ok) {
-    const err = await res.json();
-    return alert("Error: " + (err.error || JSON.stringify(err)));
-  }
-  const json = await res.json();
-  document.getElementById("aiReplyEditable").value = json.formatted_reply;
+  if (!res.ok) return alert("Error generating reply.");
+  const { formatted_reply } = await res.json();
+  document.getElementById("aiReplyEditable").value = formatted_reply;
 }
 
-// 7) READ & CONFIRM
-function readAndConfirmReply() {
+// ── 7) MANUAL READ & CONFIRM ───────────────────────────────────────────────────
+async function readAndConfirmReply() {
   const txt = document.getElementById("aiReplyEditable").value;
   if (!txt) return;
-  speak(txt + ". Say yes to send or next to skip.")
-    .then(listenForConfirmation);
+  await speak(txt + ". Say yes to send or next to skip.");
+  listenForConfirmation();
 }
+
 function listenForConfirmation() {
   if (!recognition) return alert("No speech support");
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const rec = new SR(); rec.lang = "en-US"; rec.continuous = false;
+  const rec = new SR();
+  rec.lang = "en-US";
+  rec.continuous = false;
   rec.onresult = async e => {
     const ans = e.results[0][0].transcript.toLowerCase();
-    if (ans.includes("yes")) actuallySendEmail();
-    else if (ans.includes("next")) goToNextEmail(false);
-    else speak("Please say yes or next.").then(listenForConfirmation);
+    if (ans.includes("yes")) await actuallySendEmail();
+    else if (ans.includes("next")) goToNextEmail();
+    else await speak("Please say yes or next.").then(listenForConfirmation);
   };
   rec.start();
 }
 
-// 8) SEND OR SKIP
+// ── 8) SEND OR SKIP ─────────────────────────────────────────────────────────────
 async function actuallySendEmail() {
   const txt = document.getElementById("aiReplyEditable").value;
   const res = await fetch(`${BASE_URL}/send_email`, {
@@ -216,32 +214,34 @@ async function actuallySendEmail() {
   });
   if (res.ok) {
     alert("Email sent!");
-    goToNextEmail(true);
+    goToNextEmail();
   } else {
-    const err = await res.json().catch(() => ({}));
-    alert("Send failed: " + (err.error || JSON.stringify(err)));
+    alert("Send failed.");
   }
 }
+
 function goToNextEmail() {
   currentIndex++;
   if (currentIndex < unreadIds.length) loadEmailById(unreadIds[currentIndex]);
   else showAllDoneMessage();
 }
+
 function showAllDoneMessage() {
   document.getElementById("content").style.display = "none";
   document.getElementById("doneMessage").style.display = "block";
 }
 
-// -- HANDS-FREE FSM ---------------------------------------------------------
+// ── HANDS-FREE FSM ────────────────────────────────────────────────────────────
 let fsmRecog = null;
 let fsmPhase = "idle";
-let lastGptDraft = "";
 
-function handsFreeFlow() {
+async function handsFreeFlow() {
   if (fsmPhase !== "idle") return;
   fsmPhase = "askReplaySummary";
-  speak("Would you like to hear the summary? Say yes or no.")
-    .then(() => { fsmRecog = null; ensureFsmRecog(); fsmRecog.start(); });
+  await speak("Would you like to hear the summary? Say yes or no.");
+  fsmRecog = null;
+  ensureFsmRecog();
+  fsmRecog.start();
 }
 
 function ensureFsmRecog() {
@@ -253,23 +253,21 @@ function ensureFsmRecog() {
   fsmRecog.interimResults = false;
   fsmRecog.onresult = async e => {
     const ans = e.results[0][0].transcript.trim().toLowerCase();
-    switch (fsmPhase) {
-      case "askReplaySummary": handleAskReplaySummary(ans); break;
-      case "askRecordReply": handleAskRecordReply(ans); break;
-      case "confirmReadReply": handleConfirmReadReply(ans); break;
-      case "confirmSendFinal": handleConfirmSendFinal(ans); break;
-    }
+    if (fsmPhase === "askReplaySummary") return handleAskReplaySummary(ans);
+    if (fsmPhase === "askRecordReply") return handleAskRecordReply(ans);
+    if (fsmPhase === "confirmSendFinal") return handleConfirmSendFinal(ans);
   };
   fsmRecog.onerror = err => { console.error(err.error); fsmPhase = "idle"; };
 }
 
-function handleAskReplaySummary(ans) {
+async function handleAskReplaySummary(ans) {
   fsmRecog.stop();
   if (ans.includes("yes")) {
-    const s = document.getElementById("summary").innerText;
-    speak(s)
-      .then(() => speak("Ready to record your reply? Say yes or no."))
-      .then(() => { fsmPhase = "askRecordReply"; fsmRecog.start(); });
+    const summary = document.getElementById("summary").innerText;
+    await speak(summary);
+    await speak("Ready to record your reply? Say yes or no.");
+    fsmPhase = "askRecordReply";
+    fsmRecog.start();
   } else {
     fsmPhase = "idle";
   }
@@ -278,14 +276,13 @@ function handleAskReplaySummary(ans) {
 async function handleAskRecordReply(ans) {
   fsmRecog.stop();
   if (ans.includes("yes")) {
-    speak("Recording now. Please speak your reply.");
+    await speak("Recording now. Please speak your reply.");
     let transcript = "";
     if (USE_ASSEMBLY) {
       try {
         transcript = await assemblyTranscribe(6000);
-      } catch (e) {
-        console.error(e);
-        return speak("Transcription failed, please try again.");
+      } catch {
+        return speak("Transcription failed. Try again.");
       }
     } else {
       recognition.start();
@@ -294,38 +291,38 @@ async function handleAskRecordReply(ans) {
       transcript = document.getElementById("transcript").dataset.reply || "";
     }
     if (!transcript) {
-      return speak("No speech detected. Try again.").then(() => { fsmPhase = "askRecordReply"; fsmRecog.start(); });
+      return speak("No speech detected. Try again.");
     }
-    fsmPhase = "idle";
     // send to AI
     const res = await fetch(`${BASE_URL}/send_reply`, {
       method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reply: transcript, msg_id: currentMsgId })
     });
-    const data = await res.json();
-    document.getElementById("aiReplyEditable").value = data.formatted_reply;
-    lastGptDraft = data.formatted_reply;
-    speak("Would you like me to read your reply? Say yes or no.")
-      .then(() => { fsmPhase = "confirmReadReply"; fsmRecog.start(); });
+    const { formatted_reply } = await res.json();
+    lastGptDraft = formatted_reply;
+    document.getElementById("aiReplyEditable").value = formatted_reply;
+    await speak("Say yes to send this reply or next to skip.");
+    fsmPhase = "confirmSendFinal";
+    fsmRecog.start();
   } else {
     fsmPhase = "idle";
   }
 }
 
-function handleConfirmReadReply(ans) {
-  fsmRecog.stop();
-  if (ans.includes("yes")) speak(lastGptDraft);
-  speak("Say yes to send or next to skip.")
-    .then(() => { fsmPhase = "confirmSendFinal"; fsmRecog.start(); });
-}
-
 async function handleConfirmSendFinal(ans) {
   fsmRecog.stop();
-  if (ans.includes("yes")) await actuallySendEmail();
-  else if (ans.includes("next")) goToNextEmail();
-  else return speak("Please say yes or next.").then(() => fsmRecog.start());
+  if (ans.includes("yes")) {
+    await actuallySendEmail();
+  } else if (ans.includes("next")) {
+    goToNextEmail();
+  } else {
+    await speak("Please say yes or next.");
+    fsmRecog.start();
+    return;
+  }
   fsmPhase = "idle";
 }
 
-// End of script.js code
+// Make sure your HTML contains:
+// <button onclick="handsFreeFlow()">Hands Free</button>
