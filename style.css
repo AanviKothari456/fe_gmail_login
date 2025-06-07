@@ -1,8 +1,35 @@
+
 body {
   font-family: sans-serif;
-  margin: 2rem;
+  /* center the page container */
+  margin: 2rem auto;
   max-width: 800px;
+  /* shrink the base font a bit */
+  font-size: 0.9rem;
+  background-color: #f7f7fc;  /* keep page bg if you removed it */
 }
+
+/* make your header centered and a little smaller */
+h1 {
+  text-align: center;
+  font-size: 2rem;   /* down from maybe 2.5rem or browser default */
+  margin-bottom: 1.5rem;
+}
+
+/* ensure your card/box is centered too */
+#content,
+#doneMessage {
+  margin: 1rem auto;  /* top/bottom, but horizontal auto */
+}
+
+/* optionally, tighten up h2/h3 so they scale with the smaller font */
+h2 {
+  font-size: 1.25rem;  /* was 1.5rem */
+}
+h3 {
+  font-size: 1.1rem;   /* was 1.25rem */
+}
+
 
 button {
   margin: 1rem 0;
