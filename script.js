@@ -295,18 +295,6 @@ function ensureFsmRecog() {
   fsmRecog.onerror = err => { console.error(err.error); fsmPhase = "idle"; };
 }
 
-async function handleAskReplaySummary(ans) {
-  fsmRecog.stop();
-  if (ans.includes("yes")) {
-    const summary = document.getElementById("summary").innerText;
-    await speak(summary);
-    await speak("Ready to record your reply? Say yes or no.");
-    fsmPhase = "askRecordReply";
-    fsmRecog.start();
-  } else {
-    fsmPhase = "idle";
-  }
-}
 
 async function handleAskRecordReply(ans) {
   fsmRecog.stop();
