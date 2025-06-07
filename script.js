@@ -259,7 +259,8 @@ document.getElementById("extractBtn").addEventListener("click", async () => {
     );
     if (!res.ok) throw new Error("Failed to fetch attachment summary");
     const { attachment_summary } = await res.json();
-    p.innerText = attachment_summary;
+    await elevenSpeak(attachment_summary);
+    p.innerText = ""; 
   } catch (e) {
     p.innerText = "Error: " + e.message;
   }
