@@ -120,11 +120,38 @@ async function loadEmailById(msgId) {
 }
 
 window.onload = () => {
-  if (new URLSearchParams(window.location.search).get("logged_in") === "true") {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("logged_in") === "true") {
     document.getElementById("loginBtn").style.display = "none";
-    loadInitial();
+
+    // show loading, hide main content
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("content").style.display = "none";
+
+    // fetch emails and then hide loading
+    loadInitial().finally(() => {
+      document.getElementById("loading").style.display = "none";
+    });
   }
 };
+
+async function loadInitial() {
+  const res = await fetch(`${BASE_URL}/unread_ids`, { credentials: "include" });
+  if (!res.ok) {
+    document.getElementById("content").style.display = "none";
+    return;
+  }
+  const data = await res.json();
+  unreadIds = data.ids || [];
+  if (!unreadIds.length) return showAllDoneMessage();
+
+  currentIndex = 0;
+  await loadEmailById(unreadIds[0]);
+
+  // reveal main content once the first email loads
+  document.getElementById("content").style.display = "block";
+}
+
 
 // ── 3) TOGGLE BODY ─────────────────────────────────────────────────────────────
 document.addEventListener("click", e => {
