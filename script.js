@@ -232,26 +232,22 @@ function showAllDoneMessage() {
 }
 
 // ── HANDS-FREE FSM ────────────────────────────────────────────────────────────
+// ── HANDS‐FREE FSM (replace your existing block) ───────────────────────────────
 let fsmRecog = null;
 let fsmPhase = "idle";
-
-
-
 
 async function handsFreeFlow() {
   if (fsmPhase !== "idle") return;
   fsmPhase = "askReplaySummary";
   await speak(
     "Would you like to hear the summary? " +
-    "Say yes to listen, or say skip or next to move to the next email."
+    "Say yes to listen, or skip to move to the next email."
   );
-  fsmRecog = null;
-  ensureFsmRecog();
+  initFsmRecog();
   fsmRecog.start();
 }
 
-
-function ensureFsmRecog() {
+function initFsmRecog() {
   if (fsmRecog) return;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   fsmRecog = new SR();
@@ -260,119 +256,161 @@ function ensureFsmRecog() {
   fsmRecog.interimResults = false;
   fsmRecog.onresult = async e => {
     const ans = e.results[0][0].transcript.trim().toLowerCase();
-    if (fsmPhase === "askReplaySummary") return handleAskReplaySummary(ans);
-    if (fsmPhase === "askRecordReply") return handleAskRecordReply(ans);
-    if (fsmPhase === "confirmSendFinal") return handleConfirmSendFinal(ans);
+    if (fsmPhase === "askReplaySummary")   return handleAskReplaySummary(ans);
+    if (fsmPhase === "askRecordReply")     return handleAskRecordReply(ans);
+    if (fsmPhase === "askReadReply")       return handleAskReadReply(ans);
+    if (fsmPhase === "askEditOrSend")      return handleAskEditOrSend(ans);
+    if (fsmPhase === "askRecordEdit")      return handleAskRecordEdit(ans);
+    if (fsmPhase === "confirmSendFinal")   return handleConfirmSendFinal(ans);
   };
   fsmRecog.onerror = err => { console.error(err.error); fsmPhase = "idle"; };
 }
 
-
-// ── HANDS-FREE FSM ────────────────────────────────────────────────────────────
-
+// 1) After summary prompt
 async function handleAskReplaySummary(ans) {
   fsmRecog.stop();
-  const normalized = ans.trim().toLowerCase();
-
-  if (normalized.includes("yes")) {
-    // read summary
-    const summary = document.getElementById("summary").innerText;
-    await speak(summary);
-
-    // then prompt for recording or skipping
-    await speak(
-      "Ready to record your reply? " +
-      "Say yes to start recording, or say skip or next to move to the next email."
-    );
+  if (ans.includes("yes")) {
+    await speak(document.getElementById("summary").innerText);
+    await speak("Ready to record your reply? Say yes to start, or skip to move on.");
     fsmPhase = "askRecordReply";
     fsmRecog.start();
 
-  } else if (normalized.includes("skip") || normalized.includes("next")) {
-    // skip immediately
+  } else if (ans.includes("skip")) {
     await speak("Skipping to the next email.");
     goToNextEmail();
     fsmPhase = "idle";
 
   } else {
-    // re-prompt
-    await speak(
-      "Sorry, I didn’t catch that. " +
-      "Please say yes to hear the summary, or skip/next to move on."
-    );
+    await speak("Please say yes or skip.");
     fsmRecog.start();
   }
 }
 
+// 2) Record the raw reply, send to GPT for a draft
 async function handleAskRecordReply(ans) {
   fsmRecog.stop();
-  const normalized = ans.trim().toLowerCase();
+  if (!ans.includes("yes")) {
+    // skip if not yes
+    await speak("Okay, moving on.");
+    goToNextEmail();
+    return fsmPhase = "idle";
+  }
 
-  if (normalized.includes("yes")) {
-    // proceed with recording
-    await speak("Recording now. Please speak your reply.");
-    let transcript = "";
-    if (USE_ASSEMBLY) {
-      try {
-        transcript = await assemblyTranscribe(6000);
-      } catch {
-        return speak("Transcription failed. Try again.");
-      }
-    } else {
-      recognition.start();
-      await new Promise(r => setTimeout(r, 6000));
-      recognition.stop();
-      transcript = document.getElementById("transcript").dataset.reply || "";
+  await speak("Recording now. Please speak your reply.");
+  let transcript = "";
+  if (USE_ASSEMBLY) {
+    try {
+      transcript = await assemblyTranscribe(6000);
+    } catch {
+      return speak("Transcription failed. Try again.");
     }
-    if (!transcript) {
-      return speak("No speech detected. Try again.");
-    }
+  } else {
+    recognition.start();
+    await new Promise(r => setTimeout(r, 6000));
+    recognition.stop();
+    transcript = document.getElementById("transcript").dataset.reply || "";
+  }
+  if (!transcript) return speak("No speech detected. Try again.");
 
-    // generate AI draft
-    const res = await fetch(`${BASE_URL}/send_reply`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reply: transcript, msg_id: currentMsgId })
-    });
-    const { formatted_reply } = await res.json();
-    lastGptDraft = formatted_reply;
-    document.getElementById("aiReplyEditable").value = formatted_reply;
+  // send to GPT for draft
+  const res = await fetch(`${BASE_URL}/send_reply`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reply: transcript, msg_id: currentMsgId })
+  });
+  const { formatted_reply } = await res.json();
+  lastGptDraft = formatted_reply;
+  document.getElementById("aiReplyEditable").value = formatted_reply;
 
-    // confirm send or skip
-    await speak("Say yes to send this reply or say skip/next to move on.");
-    fsmPhase = "confirmSendFinal";
+  // next: read / send / skip
+  await speak(
+    "Draft ready. " +
+    "Say read to hear it, send to send it as-is, or skip to move on."
+  );
+  fsmPhase = "askReadReply";
+  fsmRecog.start();
+}
+
+// 3) Read / send / skip the GPT draft
+async function handleAskReadReply(ans) {
+  fsmRecog.stop();
+  if (ans.includes("read")) {
+    await speak(lastGptDraft);
+    // after reading, ask edit/send/skip
+    await speak(
+      "Would you like to edit this reply, send it, or skip to the next email?"
+    );
+    fsmPhase = "askEditOrSend";
     fsmRecog.start();
 
-  } else if (normalized.includes("skip") || normalized.includes("next")) {
-    // skip instead of recording
-    await speak("Okay, moving to the next email.");
+  } else if (ans.includes("send")) {
+    await actuallySendEmail();
+    fsmPhase = "idle";
+
+  } else if (ans.includes("skip")) {
     goToNextEmail();
     fsmPhase = "idle";
 
   } else {
-    // unrecognized → re-prompt
-    await speak(
-      "Sorry, I didn’t catch that. " +
-      "Please say yes to record your reply, or skip/next to move on."
-    );
+    await speak("Please say read, send, or skip.");
     fsmRecog.start();
   }
 }
 
+// 4) If user wants to edit or send (pre‐edit)
+async function handleAskEditOrSend(ans) {
+  fsmRecog.stop();
+  if (ans.includes("send")) {
+    await actuallySendEmail();
+    fsmPhase = "idle";
 
+  } else if (ans.includes("skip")) {
+    goToNextEmail();
+    fsmPhase = "idle";
+
+  } else if (ans.includes("edit")) {
+    // record edit instructions
+    await speak("Alright, please speak your edit instructions now.");
+    fsmPhase = "askRecordEdit";
+    fsmRecog.start();
+
+  } else {
+    await speak("Say edit, send, or skip.");
+    fsmRecog.start();
+  }
+}
+
+// 5) Capture edit instructions and call backend to revise
+async function handleAskRecordEdit(ans) {
+  fsmRecog.stop();
+  // `ans` is the edit instruction
+  const editInstructions = ans;
+  // call your new edit endpoint
+  const res = await fetch(`${BASE_URL}/edit_reply`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      msg_id: currentMsgId,
+      original_draft: lastGptDraft,
+      edit_instructions: editInstructions
+    })
+  });
+  const { revised_reply } = await res.json();
+  lastGptDraft = revised_reply;
+  document.getElementById("aiReplyEditable").value = revised_reply;
+
+  await speak("Revised draft ready. Say send to send it or skip to move on.");
+  fsmPhase = "confirmSendFinal";
+  fsmRecog.start();
+}
+
+// 6) Final send / skip after edit
 async function handleConfirmSendFinal(ans) {
   fsmRecog.stop();
-  if (ans.includes("yes")) {
+  if (ans.includes("send")) {
     await actuallySendEmail();
-  } else if (ans.includes("next")) {
-    goToNextEmail();
   } else {
-    await speak("Please say yes or next.");
-    fsmRecog.start();
-    return;
+    goToNextEmail();
   }
   fsmPhase = "idle";
 }
-
-// Make sure your HTML contains:
-// <button onclick="handsFreeFlow()">Hands Free</button>
