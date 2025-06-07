@@ -160,3 +160,27 @@ audio {
   padding-left: 1rem;
 }
 
+
+/* ── LAYOUT OVERRIDES (add these at the end of ui.css) ───────────────────── */
+
+body {
+  /* center the page and limit its width */
+  margin: 2rem auto;
+  max-width: 800px;
+  /* shrink all text by 10% */
+  font-size: 0.9rem;
+}
+
+h1 {
+  /* center your main heading and tune its size */
+  text-align: center;
+  font-size: 2rem;
+  margin-bottom: var(--spacing);
+}
+
+/* force your card to center horizontally */
+#content,
+#doneMessage {
+  margin: var(--spacing) auto;
+}
+
