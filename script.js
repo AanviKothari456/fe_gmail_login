@@ -233,3 +233,42 @@ function handleAskRecordReply(answer) {
 }
 
 // The rest of FSM handlers (confirmReadReply, confirmSendFinal, etc.) unchanged...
+
+// -- Hands-Free Entry --------------------------------------------------------
+function handsFreeFlow() {
+  if (fsmPhase !== "idle") return;
+  fsmPhase = "askReplaySummary";
+  ensureFsmRecog();
+  speak("Would you like to listen to the summary? Say yes or no.")
+    .then(() => fsmRecog.start());
+}
+
+// -- FSM Recognizer Setup ----------------------------------------------------
+function ensureFsmRecog() {
+  if (fsmRecog) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    console.warn("SpeechRecognition not supported");
+    fsmPhase = "idle";
+    return;
+  }
+  fsmRecog = new SR();
+  fsmRecog.lang = "en-US";
+  fsmRecog.continuous = false;
+  fsmRecog.interimResults = false;
+  fsmRecog.onresult = (event) => {
+    const transcript = event.results[0][0].transcript.trim().toLowerCase();
+    switch (fsmPhase) {
+      case "askRecordReply":
+        handleAskRecordReply(transcript);
+        break;
+      // add other cases if needed
+      default:
+        break;
+    }
+  };
+  fsmRecog.onerror = (e) => {
+    console.error("FSM error", e);
+    fsmPhase = "idle";
+  };
+}
